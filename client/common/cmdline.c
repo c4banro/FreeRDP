@@ -23,6 +23,7 @@
 #include "config.h"
 #endif
 
+#include <ctype.h>
 #include <assert.h>
 
 #include <winpr/crt.h>
@@ -82,6 +83,7 @@ static COMMAND_LINE_ARGUMENT_A args[] =
 	{ "gd", COMMAND_LINE_VALUE_REQUIRED, "<domain>", NULL, NULL, -1, NULL, "Gateway domain" },
 	{ "gt", COMMAND_LINE_VALUE_REQUIRED, "<rpc|http|auto>", NULL, NULL, -1, NULL, "Gateway transport type" },
 	{ "gateway-usage-method", COMMAND_LINE_VALUE_REQUIRED, "<direct|detect>", NULL, NULL, -1, "gum", "Gateway usage method" },
+	{ "proxy", COMMAND_LINE_VALUE_REQUIRED, "[<protocol>://]<host>:<port>", NULL, NULL, -1, NULL, "Proxy (see also environment variable below)" },
 	{ "load-balance-info", COMMAND_LINE_VALUE_REQUIRED, "<info string>", NULL, NULL, -1, NULL, "Load balance info" },
 	{ "app", COMMAND_LINE_VALUE_REQUIRED, "<executable path> or <||alias>", NULL, NULL, -1, NULL, "Remote application program" },
 	{ "app-name", COMMAND_LINE_VALUE_REQUIRED, "<app name>", NULL, NULL, -1, NULL, "Remote application name for user interface" },
@@ -168,6 +170,7 @@ static COMMAND_LINE_ARGUMENT_A args[] =
 	{ "play-rfx", COMMAND_LINE_VALUE_REQUIRED, "<pcap file>", NULL, NULL, -1, NULL, "Replay rfx pcap file" },
 	{ "auth-only", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, NULL, "Authenticate only." },
 	{ "auto-reconnect", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, NULL, "Automatic reconnection" },
+	{ "auto-reconnect-max-retries", COMMAND_LINE_VALUE_REQUIRED, "<retries>", NULL, NULL, -1, NULL, "Automatic reconnection maximum retries, 0 for unlimited [0,1000]" },
 	{ "reconnect-cookie", COMMAND_LINE_VALUE_REQUIRED, "<base64 cookie>", NULL, NULL, -1, NULL, "Pass base64 reconnect cookie to the connection" },
 	{ "print-reconnect-cookie", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, NULL, "Print base64 reconnect cookie after connecting" },
 	{ "heartbeat", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueFalse, NULL, -1, NULL, "Support heartbeat PDUs" },
@@ -176,14 +179,15 @@ static COMMAND_LINE_ARGUMENT_A args[] =
 	{ "encryption-methods", COMMAND_LINE_VALUE_REQUIRED, "<40,56,128,FIPS>", NULL, NULL, -1, NULL, "RDP standard security encryption methods" },
 	{ "from-stdin", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL, "Read credentials from stdin, do not use defaults." },
 	{ "buildconfig", COMMAND_LINE_VALUE_FLAG | COMMAND_LINE_PRINT_BUILDCONFIG, NULL, NULL, NULL, -1, NULL, "print the build configuration" },
-	{ "log-level", COMMAND_LINE_VALUE_REQUIRED, "[OFF|FATAL|ERROR|WARN|INFO|DEBUG|TRACE]", NULL, NULL, -1, NULL, "Set the default log level, see wLog(1) for details" },
-	{ "log-filters", COMMAND_LINE_VALUE_REQUIRED, "<logger tag>:<log level>[, <logger tag>:<log level>][, ...]]", NULL, NULL, -1, NULL, "Set logger filters, see wLog(1) for details" },
+	{ "log-level", COMMAND_LINE_VALUE_REQUIRED, "[OFF|FATAL|ERROR|WARN|INFO|DEBUG|TRACE]", NULL, NULL, -1, NULL, "Set the default log level, see wLog(7) for details" },
+	{ "log-filters", COMMAND_LINE_VALUE_REQUIRED, "<logger tag>:<log level>[, <logger tag>:<log level>][, ...]]", NULL, NULL, -1, NULL, "Set logger filters, see wLog(7) for details" },
 	{ "pwidth", COMMAND_LINE_VALUE_REQUIRED, "<physical width (mm)>", NULL, NULL, -1, NULL, "Physical width of display (in millimeters)" },
 	{ "pheight", COMMAND_LINE_VALUE_REQUIRED, "<physical height (mm)>", NULL, NULL, -1, NULL, "Physical height of display (in millimeters)" },
 	{ "orientation", COMMAND_LINE_VALUE_REQUIRED, "<orientation>", NULL, NULL, -1, NULL, "Orientation of display in degrees (0, 90, 180, 270)" },
 	{ "scale", COMMAND_LINE_VALUE_REQUIRED, "<scale amount (%%)>", "100", NULL, -1, NULL, "Scaling factor of the display (value of 100, 140, or 180)" },
 	{ "scale-desktop", COMMAND_LINE_VALUE_REQUIRED, "<scale amount (%%)>", "100", NULL, -1, NULL, "Scaling factor for desktop applications (value between 100 and 500)" },
 	{ "scale-device", COMMAND_LINE_VALUE_REQUIRED, "<scale amount (%%)>", "100", NULL, -1, NULL, "Scaling factor for app store applications (100, 140, or 180)" },
+	{ "action-script", COMMAND_LINE_VALUE_REQUIRED, "<file name>", "~/.config/freerdp/action.sh", NULL, -1, NULL, "Action script" },
 	{ NULL, 0, NULL, NULL, NULL, -1, NULL, NULL }
 };
 
@@ -293,6 +297,16 @@ BOOL freerdp_client_print_command_line_help(int argc, char** argv)
 	printf("Multimedia Redirection: /multimedia:sys:alsa\n");
 	printf("USB Device Redirection: /usb:id,dev:054c:0268\n");
 	printf("\n");
+
+	printf("For Gateways, the https_proxy environment variable is respected:\n");
+#ifdef _WIN32
+	printf("    set HTTPS_PROXY=http://proxy.contoso.com:3128/\n");
+#else
+	printf("    export https_proxy=http://proxy.contoso.com:3128/\n");
+#endif
+	printf("    xfreerdp /g:rdp.contoso.com ...\n");
+	printf("\n");
+
 	printf("More documentation is coming, in the meantime consult source files\n");
 	printf("\n");
 	return TRUE;
@@ -614,6 +628,13 @@ BOOL freerdp_client_add_static_channel(rdpSettings* settings, int count,
 {
 	int index;
 	ADDIN_ARGV* args;
+
+	if (!settings || !params || !params[0])
+		return FALSE;
+
+	if (freerdp_static_channel_collection_find(settings, params[0]))
+		return TRUE;
+
 	args = (ADDIN_ARGV*) calloc(1, sizeof(ADDIN_ARGV));
 
 	if (!args)
@@ -659,6 +680,13 @@ BOOL freerdp_client_add_dynamic_channel(rdpSettings* settings, int count,
 {
 	int index;
 	ADDIN_ARGV* args;
+
+	if (!settings || !params || !params[0])
+		return FALSE;
+
+	if (freerdp_dynamic_channel_collection_find(settings, params[0]))
+		return TRUE;
+
 	args = (ADDIN_ARGV*) malloc(sizeof(ADDIN_ARGV));
 
 	if (!args)
@@ -1776,6 +1804,45 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings,
 			settings->GatewayUseSameCredentials = TRUE;
 			freerdp_set_gateway_usage_method(settings, TSC_PROXY_MODE_DIRECT);
 		}
+		CommandLineSwitchCase(arg, "proxy")
+		{
+			if (arg->Flags & COMMAND_LINE_VALUE_PRESENT)
+			{
+				p = strstr(arg->Value, "://");
+				if (p) {
+					*p = '\0';
+					if (!strcmp("http", arg->Value)) {
+						settings->ProxyType = PROXY_TYPE_HTTP;
+					} else {
+						WLog_ERR(TAG, "Only HTTP proxys supported by now");
+						return COMMAND_LINE_ERROR_UNEXPECTED_VALUE;
+					}
+					arg->Value = p + 3;
+				}
+
+				p = strchr(arg->Value, ':');
+
+				if (p)
+				{
+					length = (int) (p - arg->Value);
+					if (!isdigit(p[1])) {
+						WLog_ERR(TAG, "Could not parse proxy port");
+						return COMMAND_LINE_ERROR_UNEXPECTED_VALUE;
+					}
+					settings->ProxyPort = atoi(&p[1]);
+					settings->ProxyHostname = (char*) malloc(length + 1);
+					strncpy(settings->ProxyHostname, arg->Value, length);
+					settings->ProxyHostname[length] = '\0';
+
+					settings->ProxyType = PROXY_TYPE_HTTP;
+				}
+			}
+			else
+			{
+				WLog_ERR(TAG, "Option http-proxy needs argument.");
+				return COMMAND_LINE_ERROR_UNEXPECTED_VALUE;
+			}
+		}
 		CommandLineSwitchCase(arg, "gu")
 		{
 			if (!(gwUser = _strdup(arg->Value)))
@@ -2309,6 +2376,7 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings,
 		CommandLineSwitchCase(arg, "max-loop-time")
 		{
 			settings->MaxTimeInCheckLoop = atoi(arg->Value);
+
 			if ((long) settings->MaxTimeInCheckLoop < 0)
 			{
 				WLog_ERR(TAG, "invalid max loop time: %s", arg->Value);
@@ -2359,6 +2427,14 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings,
 		CommandLineSwitchCase(arg, "auto-reconnect")
 		{
 			settings->AutoReconnectionEnabled = arg->Value ? TRUE : FALSE;
+		}
+		CommandLineSwitchCase(arg, "auto-reconnect-max-retries")
+		{
+			settings->AutoReconnectMaxRetries = atoi(arg->Value);
+
+			if ((settings->AutoReconnectMaxRetries < 0) ||
+				(settings->AutoReconnectMaxRetries > 1000))
+				return COMMAND_LINE_ERROR;
 		}
 		CommandLineSwitchCase(arg, "reconnect-cookie")
 		{
@@ -2445,6 +2521,12 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings,
 				return COMMAND_LINE_ERROR;
 			}
 		}
+		CommandLineSwitchCase(arg, "action-script")
+		{
+			free (settings->ActionScript);
+			if (!(settings->ActionScript = _strdup(arg->Value)))
+				return COMMAND_LINE_ERROR_MEMORY;
+		}
 		CommandLineSwitchDefault(arg)
 		{
 		}
@@ -2452,36 +2534,41 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings,
 	}
 	while ((arg = CommandLineFindNextArgumentA(arg)) != NULL);
 
-	free(settings->Username);
-
-	if (!settings->Domain && user)
+	if (user)
 	{
-		BOOL ret;
-		free(settings->Domain);
-		ret = freerdp_parse_username(user, &settings->Username, &settings->Domain);
-		free(user);
+		free(settings->Username);
+		if (!settings->Domain && user)
+		{
+			BOOL ret;
+			free(settings->Domain);
 
-		if (!ret)
-			return COMMAND_LINE_ERROR;
+			ret = freerdp_parse_username(user, &settings->Username, &settings->Domain);
+			free(user);
+			if (!ret)
+				return COMMAND_LINE_ERROR;
+		}
+		else
+			settings->Username = user;
 	}
-	else
-		settings->Username = user;
 
-	free(settings->GatewayUsername);
-
-	if (!settings->GatewayDomain && gwUser)
+	if (gwUser)
 	{
-		BOOL ret;
-		free(settings->GatewayDomain);
-		ret = freerdp_parse_username(gwUser, &settings->GatewayUsername,
-		                             &settings->GatewayDomain);
-		free(gwUser);
+		free(settings->GatewayUsername);
 
-		if (!ret)
-			return COMMAND_LINE_ERROR;
+		if (!settings->GatewayDomain && gwUser)
+		{
+			BOOL ret;
+			free(settings->GatewayDomain);
+			ret = freerdp_parse_username(gwUser, &settings->GatewayUsername,
+						     &settings->GatewayDomain);
+			free(gwUser);
+
+			if (!ret)
+				return COMMAND_LINE_ERROR;
+		}
+		else
+			settings->GatewayUsername = gwUser;
 	}
-	else
-		settings->GatewayUsername = gwUser;
 
 	freerdp_performance_flags_make(settings);
 
@@ -2523,9 +2610,8 @@ static BOOL freerdp_client_load_static_channel_addin(rdpChannels* channels,
 {
 	PVIRTUALCHANNELENTRY entry = NULL;
 	PVIRTUALCHANNELENTRYEX entryEx = NULL;
-
 	entryEx = (PVIRTUALCHANNELENTRYEX) freerdp_load_channel_addin_entry(name, NULL, NULL,
-						FREERDP_ADDIN_CHANNEL_STATIC | FREERDP_ADDIN_CHANNEL_ENTRYEX);
+	          FREERDP_ADDIN_CHANNEL_STATIC | FREERDP_ADDIN_CHANNEL_ENTRYEX);
 
 	if (!entryEx)
 		entry = freerdp_load_channel_addin_entry(name, NULL, NULL, FREERDP_ADDIN_CHANNEL_STATIC);
@@ -2614,7 +2700,7 @@ BOOL freerdp_client_load_addins(rdpChannels* channels, rdpSettings* settings)
 	if (settings->DeviceRedirection)
 	{
 		if (!freerdp_client_load_static_channel_addin(channels, settings, "rdpdr",
-		        settings))
+			settings))
 			return FALSE;
 
 		if (!freerdp_static_channel_collection_find(settings, "rdpsnd"))
@@ -2666,14 +2752,11 @@ BOOL freerdp_client_load_addins(rdpChannels* channels, rdpSettings* settings)
 
 	if (settings->RedirectClipboard)
 	{
-		if (!freerdp_static_channel_collection_find(settings, "cliprdr"))
-		{
-			char* params[1];
-			params[0] = "cliprdr";
+		char* params[1];
+		params[0] = "cliprdr";
 
-			if (!freerdp_client_add_static_channel(settings, 1, (char**) params))
-				return FALSE;
-		}
+		if (!freerdp_client_add_static_channel(settings, 1, (char**) params))
+			return FALSE;
 	}
 
 	if (settings->LyncRdpMode)
@@ -2692,14 +2775,14 @@ BOOL freerdp_client_load_addins(rdpChannels* channels, rdpSettings* settings)
 	if (settings->EncomspVirtualChannel)
 	{
 		if (!freerdp_client_load_static_channel_addin(channels, settings, "encomsp",
-		        settings))
+			settings))
 			return FALSE;
 	}
 
 	if (settings->RemdeskVirtualChannel)
 	{
 		if (!freerdp_client_load_static_channel_addin(channels, settings, "remdesk",
-		        settings))
+			settings))
 			return FALSE;
 	}
 

@@ -321,15 +321,14 @@ fail:
 static BOOL xf_gdi_patblt(rdpContext* context, PATBLT_ORDER* patblt)
 {
 	const rdpBrush* brush;
-	UINT32 foreColor;
-	UINT32 backColor;
 	xfContext* xfc = (xfContext*) context;
 	BOOL ret = FALSE;
+	XColor xfg, xbg;
 
-	if (!xf_decode_color(context->gdi, patblt->foreColor, &foreColor, NULL))
+	if (!xf_decode_color(xfc, patblt->foreColor, &xfg))
 		return FALSE;
 
-	if (!xf_decode_color(context->gdi, patblt->backColor, &backColor, NULL))
+	if (!xf_decode_color(xfc, patblt->backColor, &xbg))
 		return FALSE;
 
 	xf_lock_x11(xfc, FALSE);
@@ -342,8 +341,8 @@ static BOOL xf_gdi_patblt(rdpContext* context, PATBLT_ORDER* patblt)
 	{
 		case GDI_BS_SOLID:
 			XSetFillStyle(xfc->display, xfc->gc, FillSolid);
-			XSetBackground(xfc->display, xfc->gc, backColor);
-			XSetForeground(xfc->display, xfc->gc, foreColor);
+			XSetBackground(xfc->display, xfc->gc, xbg.pixel);
+			XSetForeground(xfc->display, xfc->gc, xfg.pixel);
 			XFillRectangle(xfc->display, xfc->drawing, xfc->gc,
 			               patblt->nLeftRect, patblt->nTopRect, patblt->nWidth, patblt->nHeight);
 			break;
@@ -352,8 +351,8 @@ static BOOL xf_gdi_patblt(rdpContext* context, PATBLT_ORDER* patblt)
 			{
 				Pixmap pattern = xf_mono_bitmap_new(xfc, 8, 8,
 				                                    &GDI_BS_HATCHED_PATTERNS[8 * brush->hatch]);
-				XSetBackground(xfc->display, xfc->gc, backColor);
-				XSetForeground(xfc->display, xfc->gc, foreColor);
+				XSetBackground(xfc->display, xfc->gc, xbg.pixel);
+				XSetForeground(xfc->display, xfc->gc, xfg.pixel);
 				XSetFillStyle(xfc->display, xfc->gc, FillOpaqueStippled);
 				XSetStipple(xfc->display, xfc->gc, pattern);
 				XSetTSOrigin(xfc->display, xfc->gc, brush->x, brush->y);
@@ -378,8 +377,8 @@ static BOOL xf_gdi_patblt(rdpContext* context, PATBLT_ORDER* patblt)
 			else
 			{
 				Pixmap pattern = xf_mono_bitmap_new(xfc, 8, 8, brush->data);
-				XSetBackground(xfc->display, xfc->gc, backColor);
-				XSetForeground(xfc->display, xfc->gc, foreColor);
+				XSetBackground(xfc->display, xfc->gc, xfg.pixel);
+				XSetForeground(xfc->display, xfc->gc, xbg.pixel);
 				XSetFillStyle(xfc->display, xfc->gc, FillOpaqueStippled);
 				XSetStipple(xfc->display, xfc->gc, pattern);
 				XSetTSOrigin(xfc->display, xfc->gc, brush->x, brush->y);
@@ -437,18 +436,17 @@ fail:
 static BOOL xf_gdi_opaque_rect(rdpContext* context,
                                const OPAQUE_RECT_ORDER* opaque_rect)
 {
-	UINT32 color;
-	rdpGdi* gdi = context->gdi;
+	XColor color;
 	xfContext* xfc = (xfContext*) context;
 	BOOL ret = TRUE;
 
-	if (!xf_decode_color(gdi, opaque_rect->color, &color, NULL))
+	if (!xf_decode_color(xfc, opaque_rect->color, &color))
 		return FALSE;
 
 	xf_lock_x11(xfc, FALSE);
 	XSetFunction(xfc->display, xfc->gc, GXcopy);
 	XSetFillStyle(xfc->display, xfc->gc, FillSolid);
-	XSetForeground(xfc->display, xfc->gc, color);
+	XSetForeground(xfc->display, xfc->gc, color.pixel);
 	XFillRectangle(xfc->display, xfc->drawing, xfc->gc,
 	               opaque_rect->nLeftRect, opaque_rect->nTopRect,
 	               opaque_rect->nWidth, opaque_rect->nHeight);
@@ -468,16 +466,15 @@ static BOOL xf_gdi_multi_opaque_rect(rdpContext* context,
 	UINT32 i;
 	xfContext* xfc = (xfContext*) context;
 	BOOL ret = TRUE;
-	rdpGdi* gdi = context->gdi;
-	UINT32 color;
+	XColor color;
 
-	if (!xf_decode_color(gdi, multi_opaque_rect->color, &color, NULL))
+	if (!xf_decode_color(xfc, multi_opaque_rect->color, &color))
 		return FALSE;
 
 	xf_lock_x11(xfc, FALSE);
 	XSetFunction(xfc->display, xfc->gc, GXcopy);
 	XSetFillStyle(xfc->display, xfc->gc, FillSolid);
-	XSetForeground(xfc->display, xfc->gc, color);
+	XSetForeground(xfc->display, xfc->gc, color.pixel);
 
 	for (i = 0; i < multi_opaque_rect->numRectangles; i++)
 	{
@@ -500,17 +497,17 @@ static BOOL xf_gdi_multi_opaque_rect(rdpContext* context,
 
 static BOOL xf_gdi_line_to(rdpContext* context, const LINE_TO_ORDER* line_to)
 {
-	UINT32 color;
+	XColor color;
 	xfContext* xfc = (xfContext*) context;
 	BOOL ret = TRUE;
 
-	if (!xf_decode_color(context->gdi, line_to->penColor, &color, NULL))
+	if (!xf_decode_color(xfc, line_to->penColor, &color))
 		return FALSE;
 
 	xf_lock_x11(xfc, FALSE);
 	xf_set_rop2(xfc, line_to->bRop2);
 	XSetFillStyle(xfc->display, xfc->gc, FillSolid);
-	XSetForeground(xfc->display, xfc->gc, color);
+	XSetForeground(xfc->display, xfc->gc, color.pixel);
 	XDrawLine(xfc->display, xfc->drawing, xfc->gc,
 	          line_to->nXStart, line_to->nYStart, line_to->nXEnd, line_to->nYEnd);
 
@@ -569,18 +566,18 @@ static BOOL xf_gdi_polyline(rdpContext* context,
 {
 	int i;
 	int npoints;
-	UINT32 color;
+	XColor color;
 	XPoint* points;
 	xfContext* xfc = (xfContext*) context;
 	BOOL ret = TRUE;
 
-	if (!xf_decode_color(context->gdi, polyline->penColor, &color, NULL))
+	if (!xf_decode_color(xfc, polyline->penColor, &color))
 		return FALSE;
 
 	xf_lock_x11(xfc, FALSE);
 	xf_set_rop2(xfc, polyline->bRop2);
 	XSetFillStyle(xfc->display, xfc->gc, FillSolid);
-	XSetForeground(xfc->display, xfc->gc, color);
+	XSetForeground(xfc->display, xfc->gc, color.pixel);
 	npoints = polyline->numDeltaEntries + 1;
 	points = malloc(sizeof(XPoint) * npoints);
 
@@ -652,8 +649,8 @@ static BOOL xf_gdi_mem3blt(rdpContext* context, MEM3BLT_ORDER* mem3blt)
 {
 	const rdpBrush* brush;
 	xfBitmap* bitmap;
-	UINT32 foreColor;
-	UINT32 backColor;
+	XColor foreColor;
+	XColor backColor;
 	Pixmap pattern = 0;
 	xfContext* xfc = (xfContext*) context;
 	BOOL ret = FALSE;
@@ -661,10 +658,10 @@ static BOOL xf_gdi_mem3blt(rdpContext* context, MEM3BLT_ORDER* mem3blt)
 	if (!xfc->display || !xfc->drawing)
 		return FALSE;
 
-	if (!xf_decode_color(context->gdi, mem3blt->foreColor, &foreColor, NULL))
+	if (!xf_decode_color(xfc, mem3blt->foreColor, &foreColor))
 		return FALSE;
 
-	if (!xf_decode_color(context->gdi, mem3blt->backColor, &backColor, NULL))
+	if (!xf_decode_color(xfc, mem3blt->backColor, &backColor))
 		return FALSE;
 
 	xf_lock_x11(xfc, FALSE);
@@ -687,8 +684,8 @@ static BOOL xf_gdi_mem3blt(rdpContext* context, MEM3BLT_ORDER* mem3blt)
 			else
 			{
 				pattern = xf_mono_bitmap_new(xfc, 8, 8, brush->data);
-				XSetBackground(xfc->display, xfc->gc, backColor);
-				XSetForeground(xfc->display, xfc->gc, foreColor);
+				XSetBackground(xfc->display, xfc->gc, backColor.pixel);
+				XSetForeground(xfc->display, xfc->gc, foreColor.pixel);
 				XSetFillStyle(xfc->display, xfc->gc, FillOpaqueStippled);
 				XSetStipple(xfc->display, xfc->gc, pattern);
 				XSetTSOrigin(xfc->display, xfc->gc, brush->x, brush->y);
@@ -698,8 +695,8 @@ static BOOL xf_gdi_mem3blt(rdpContext* context, MEM3BLT_ORDER* mem3blt)
 
 		case GDI_BS_SOLID:
 			XSetFillStyle(xfc->display, xfc->gc, FillSolid);
-			XSetBackground(xfc->display, xfc->gc, backColor);
-			XSetForeground(xfc->display, xfc->gc, foreColor);
+			XSetBackground(xfc->display, xfc->gc, backColor.pixel);
+			XSetForeground(xfc->display, xfc->gc, foreColor.pixel);
 			XSetTSOrigin(xfc->display, xfc->gc, brush->x, brush->y);
 			break;
 
@@ -735,11 +732,11 @@ static BOOL xf_gdi_polygon_sc(rdpContext* context,
 {
 	int i, npoints;
 	XPoint* points;
-	UINT32 brush_color;
+	XColor brush_color;
 	xfContext* xfc = (xfContext*) context;
 	BOOL ret = TRUE;
 
-	if (!xf_decode_color(context->gdi, polygon_sc->brushColor, &brush_color, NULL))
+	if (!xf_decode_color(xfc, polygon_sc->brushColor, &brush_color))
 		return FALSE;
 
 	xf_lock_x11(xfc, FALSE);
@@ -778,7 +775,7 @@ static BOOL xf_gdi_polygon_sc(rdpContext* context,
 	}
 
 	XSetFillStyle(xfc->display, xfc->gc, FillSolid);
-	XSetForeground(xfc->display, xfc->gc, brush_color);
+	XSetForeground(xfc->display, xfc->gc, brush_color.pixel);
 	XFillPolygon(xfc->display, xfc->drawing, xfc->gc,
 	             points, npoints, Complex, CoordModePrevious);
 
@@ -801,15 +798,15 @@ static BOOL xf_gdi_polygon_cb(rdpContext* context,
 	XPoint* points;
 	Pixmap pattern;
 	const rdpBrush* brush;
-	UINT32 foreColor;
-	UINT32 backColor;
+	XColor foreColor;
+	XColor backColor;
 	xfContext* xfc = (xfContext*) context;
 	BOOL ret = TRUE;
 
-	if (!xf_decode_color(context->gdi, polygon_cb->foreColor, &foreColor, NULL))
+	if (!xf_decode_color(xfc, polygon_cb->foreColor, &foreColor))
 		return FALSE;
 
-	if (!xf_decode_color(context->gdi, polygon_cb->backColor, &backColor, NULL))
+	if (!xf_decode_color(xfc, polygon_cb->backColor, &backColor))
 		return FALSE;
 
 	xf_lock_x11(xfc, FALSE);
@@ -859,8 +856,8 @@ static BOOL xf_gdi_polygon_cb(rdpContext* context,
 		else
 		{
 			pattern = xf_mono_bitmap_new(xfc, 8, 8, brush->data);
-			XSetForeground(xfc->display, xfc->gc, backColor);
-			XSetBackground(xfc->display, xfc->gc, foreColor);
+			XSetForeground(xfc->display, xfc->gc, backColor.pixel);
+			XSetBackground(xfc->display, xfc->gc, foreColor.pixel);
 
 			if (polygon_cb->backMode == BACKMODE_TRANSPARENT)
 				XSetFillStyle(xfc->display, xfc->gc, FillStippled);
@@ -972,7 +969,7 @@ static BOOL xf_gdi_surface_update_frame(xfContext* xfc, UINT16 tx, UINT16 ty,
 
 static BOOL xf_gdi_update_screen(xfContext* xfc,
                                  const SURFACE_BITS_COMMAND* cmd,
-                                 const BYTE* pSrcData)
+                                 const BYTE* pSrcData, UINT32 scanline)
 {
 	BOOL ret = FALSE;
 	XImage* image;
@@ -983,7 +980,8 @@ static BOOL xf_gdi_update_screen(xfContext* xfc,
 	XSetFunction(xfc->display, xfc->gc, GXcopy);
 	XSetFillStyle(xfc->display, xfc->gc, FillSolid);
 	image = XCreateImage(xfc->display, xfc->visual, xfc->depth, ZPixmap, 0,
-	                     (char*) pSrcData, cmd->width, cmd->height, xfc->scanline_pad, 0);
+	                     (char*) pSrcData, cmd->width, cmd->height,
+	                     xfc->scanline_pad, scanline);
 
 	if (image)
 	{
@@ -1005,14 +1003,12 @@ static BOOL xf_gdi_surface_bits(rdpContext* context,
 	xfContext* xfc = (xfContext*) context;
 	BOOL ret = FALSE;
 	DWORD format;
-	DWORD stride;
 	rdpGdi* gdi;
 
 	if (!context || !cmd || !context->gdi)
 		return FALSE;
 
 	gdi = context->gdi;
-	stride = cmd->width * GetBytesPerPixel(gdi->dstFormat);
 	xf_lock_x11(xfc, FALSE);
 
 	switch (cmd->codecID)
@@ -1020,18 +1016,16 @@ static BOOL xf_gdi_surface_bits(rdpContext* context,
 		case RDP_CODEC_ID_REMOTEFX:
 			if (!rfx_process_message(context->codecs->rfx, cmd->bitmapData,
 			                         cmd->bitmapDataLength, 0, 0,
-			                         gdi->primary_buffer, gdi->dstFormat, stride,
+			                         gdi->primary_buffer, gdi->dstFormat, gdi->stride,
 			                         gdi->height, NULL))
 				goto fail;
 
 			break;
 
 		case RDP_CODEC_ID_NSCODEC:
-			format = gdi->dstFormat;
-
 			if (!nsc_process_message(context->codecs->nsc, cmd->bpp, cmd->width,
 			                         cmd->height, cmd->bitmapData, cmd->bitmapDataLength,
-			                         gdi->primary_buffer, format, stride,
+			                         gdi->primary_buffer, gdi->dstFormat, gdi->stride,
 			                         0, 0, cmd->width, cmd->height, FREERDP_FLIP_VERTICAL))
 				goto fail;
 
@@ -1041,10 +1035,10 @@ static BOOL xf_gdi_surface_bits(rdpContext* context,
 			pSrcData = cmd->bitmapData;
 			format = gdi_get_pixel_format(cmd->bpp);
 
-			if (!freerdp_image_copy(gdi->primary_buffer, gdi->dstFormat, stride,
-			                        0, 0,
-			                        cmd->width, cmd->height, pSrcData,
-			                        format, 0, 0, 0, &xfc->context.gdi->palette, FREERDP_FLIP_VERTICAL))
+			if (!freerdp_image_copy(gdi->primary_buffer, gdi->dstFormat, gdi->stride,
+			                        0, 0, cmd->width, cmd->height,
+			                        pSrcData, format, 0, 0, 0,
+			                        &xfc->context.gdi->palette, FREERDP_FLIP_VERTICAL))
 				goto fail;
 
 			break;
@@ -1055,7 +1049,7 @@ static BOOL xf_gdi_surface_bits(rdpContext* context,
 			goto fail;
 	}
 
-	ret = xf_gdi_update_screen(xfc, cmd, gdi->primary_buffer);
+	ret = xf_gdi_update_screen(xfc, cmd, gdi->primary_buffer, gdi->stride);
 fail:
 	xf_unlock_x11(xfc, FALSE);
 	return ret;

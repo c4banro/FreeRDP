@@ -176,8 +176,9 @@ UINT xf_OutputExpose(xfContext* xfc, UINT32 x, UINT32 y,
 	return status;
 }
 
-static INLINE UINT32 x11_pad_scanline(UINT32 scanline, UINT32 inPad)
+UINT32 x11_pad_scanline(UINT32 scanline, UINT32 inPad)
 {
+	/* Ensure X11 alignment is met */
 	if (inPad > 0)
 	{
 		const UINT32 align = inPad / 8;
@@ -186,6 +187,10 @@ static INLINE UINT32 x11_pad_scanline(UINT32 scanline, UINT32 inPad)
 		if (align != pad)
 			scanline += pad;
 	}
+
+	/* 16 byte alingment is required for ASM optimized code */
+	if (scanline % 16)
+		scanline += 16 - scanline % 16;
 
 	return scanline;
 }
@@ -275,7 +280,7 @@ static UINT xf_CreateSurface(RdpgfxClientContext* context,
 		surface->image = XCreateImage(xfc->display, xfc->visual, xfc->depth,
 		                              ZPixmap, 0, (char*) surface->stage,
 		                              surface->gdi.width, surface->gdi.height,
-		                              xfc->scanline_pad, surface->gdi.scanline);
+		                              xfc->scanline_pad, surface->stageScanline);
 	}
 
 	surface->gdi.outputMapped = FALSE;

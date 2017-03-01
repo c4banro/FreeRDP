@@ -205,10 +205,12 @@ void* shw_client_thread(void* arg)
 		fds_count = 0;
 
 		for (index = 0; index < rcount; index++)
-			fds[fds_count++] = rfds[index];
+			if ( rfds[index] != NULL )
+				fds[fds_count++] = rfds[index];
 
 		for (index = 0; index < wcount; index++)
-			fds[fds_count++] = wfds[index];
+			if ( wfds[index] != NULL )
+				fds[fds_count++] = wfds[index];
 
 		if (MsgWaitForMultipleObjects(fds_count, fds, FALSE, 1000,
 		                              QS_ALLINPUT) == WAIT_FAILED)

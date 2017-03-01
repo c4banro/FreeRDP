@@ -84,17 +84,12 @@ BOOL freerdp_image_copy_from_monochrome(BYTE* pDstData, UINT32 DstFormat,
 {
 	UINT32 x, y;
 	BOOL vFlip;
-	UINT32 nDstPad;
 	UINT32 monoStep;
-	UINT32 dstBitsPerPixel;
-	UINT32 dstBytesPerPixel;
-	dstBitsPerPixel = GetBitsPerPixel(DstFormat);
-	dstBytesPerPixel = GetBytesPerPixel(DstFormat);
+	const UINT32 dstBytesPerPixel = GetBytesPerPixel(DstFormat);
 
 	if (nDstStep == 0)
 		nDstStep = dstBytesPerPixel * nWidth;
 
-	nDstPad = (nDstStep - (nWidth * dstBytesPerPixel));
 	vFlip = FALSE;
 	monoStep = (nWidth + 7) / 8;
 
@@ -167,7 +162,6 @@ BOOL freerdp_image_copy_from_pointer_data(
 {
 	UINT32 x, y;
 	BOOL vFlip;
-	UINT32 nDstPad;
 	UINT32 xorStep;
 	UINT32 andStep;
 	UINT32 xorBit;
@@ -182,7 +176,6 @@ BOOL freerdp_image_copy_from_pointer_data(
 	if (nDstStep <= 0)
 		nDstStep = dstBytesPerPixel * nWidth;
 
-	nDstPad = (nDstStep - (nWidth * dstBytesPerPixel));
 	vFlip = (xorBpp == 1) ? FALSE : TRUE;
 	andStep = (nWidth + 7) / 8;
 	andStep += (andStep % 2);
@@ -357,8 +350,6 @@ BOOL freerdp_image_copy_from_pointer_data(
 						}
 
 						/* Ignore the AND mask, if the color format already supplies alpha data. */
-						color = xorPixel;
-
 						if (andPixel && !ignoreAndMask)
 						{
 							if (xorPixel == 0xFF000000) /* black -> transparent */
@@ -384,11 +375,11 @@ BOOL freerdp_image_copy_from_pointer_data(
 	}
 }
 
-static BOOL overlapping(const BYTE* pDstData, UINT32 nXDst, UINT32 nYDst,
-                        UINT32 nDstStep, UINT32 dstBytesPerPixel,
-                        const BYTE* pSrcData, UINT32 nXSrc, UINT32 nYSrc,
-                        UINT32 nSrcStep, UINT32 srcBytesPerPixel,
-                        UINT32 nWidth, UINT32 nHeight)
+static INLINE BOOL overlapping(const BYTE* pDstData, UINT32 nXDst, UINT32 nYDst,
+                               UINT32 nDstStep, UINT32 dstBytesPerPixel,
+                               const BYTE* pSrcData, UINT32 nXSrc, UINT32 nYSrc,
+                               UINT32 nSrcStep, UINT32 srcBytesPerPixel,
+                               UINT32 nWidth, UINT32 nHeight)
 {
 	const BYTE* pDstStart = &pDstData[nXDst * dstBytesPerPixel + nYDst * nDstStep];
 	const BYTE* pDstEnd = pDstStart + nHeight * nDstStep;
@@ -416,7 +407,7 @@ BOOL freerdp_image_copy(BYTE* pDstData, DWORD DstFormat,
 	const UINT32 copyDstWidth = nWidth * dstByte;
 	const UINT32 xSrcOffset = nXSrc * srcByte;
 	const UINT32 xDstOffset = nXDst * dstByte;
-	BOOL vSrcVFlip = flags & FREERDP_FLIP_VERTICAL;
+	const BOOL vSrcVFlip = flags & FREERDP_FLIP_VERTICAL;
 	UINT32 srcVOffset = 0;
 	INT32 srcVMultiplier = 1;
 	UINT32 dstVOffset = 0;
@@ -556,16 +547,20 @@ BOOL freerdp_image_fill(BYTE* pDstData, DWORD DstFormat,
                         UINT32 nWidth, UINT32 nHeight, UINT32 color)
 {
 	UINT32 x, y;
+	const UINT32 bpp = GetBytesPerPixel(DstFormat);
+	BYTE* pFirstDstLine = &pDstData[nYDst * nDstStep];
+	BYTE* pFirstDstLineXOffset = &pFirstDstLine[nXDst * bpp];
 
-	for (y = 0; y < nHeight; y++)
+	for (x = 0; x < nWidth; x++)
 	{
-		BYTE* pDstLine = &pDstData[(y + nYDst) * nDstStep];
+		BYTE* pDst = &pFirstDstLine[(x + nXDst) * bpp];
+		WriteColor(pDst, DstFormat, color);
+	}
 
-		for (x = 0; x < nWidth; x++)
-		{
-			BYTE* pDst = &pDstLine[(x + nXDst) * GetBytesPerPixel(DstFormat)];
-			WriteColor(pDst, DstFormat, color);
-		}
+	for (y = 1; y < nHeight; y++)
+	{
+		BYTE* pDstLine = &pDstData[(y + nYDst) * nDstStep + nXDst * bpp];
+		memcpy(pDstLine, pFirstDstLineXOffset, nWidth * bpp);
 	}
 
 	return TRUE;

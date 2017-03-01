@@ -761,7 +761,6 @@ int win_shadow_wds_init(winShadowSubsystem* subsystem)
 		return -1;
 	}
 
-
 	status = ConvertFromUnicode(CP_UTF8, 0, (WCHAR*) bstrConnectionString,
 		((UINT32*) bstrConnectionString)[-1], &(file->ConnectionString2), 0, NULL, NULL);
 

@@ -252,13 +252,28 @@ void settings_load_hkey_local_machine(rdpSettings* settings)
 
 BOOL settings_get_computer_name(rdpSettings* settings)
 {
-	DWORD nSize = MAX_COMPUTERNAME_LENGTH + 1;
-	CHAR computerName[MAX_COMPUTERNAME_LENGTH + 1];
+	DWORD nSize = 0;
+	CHAR* computerName;
 
-	if (!GetComputerNameExA(ComputerNameNetBIOS, computerName, &nSize))
+	if (GetComputerNameExA(ComputerNameNetBIOS, NULL, &nSize) || (GetLastError() != ERROR_MORE_DATA) ||
+	    (nSize < 2))
 		return FALSE;
 
-	settings->ComputerName = _strdup(computerName);
+	computerName = calloc(nSize, sizeof(CHAR));
+
+	if (!computerName)
+		return FALSE;
+
+	if (!GetComputerNameExA(ComputerNameNetBIOS, computerName, &nSize))
+	{
+		free(computerName);
+		return FALSE;
+	}
+
+	if (nSize > MAX_COMPUTERNAME_LENGTH)
+		computerName[MAX_COMPUTERNAME_LENGTH] = '\0';
+
+	settings->ComputerName = computerName;
 
 	if (!settings->ComputerName)
 		return FALSE;
@@ -481,7 +496,8 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	settings->RemoteAppNumIconCaches = 3;
 	settings->RemoteAppNumIconCacheEntries = 12;
 	settings->VirtualChannelChunkSize = CHANNEL_CHUNK_LENGTH;
-	settings->MultifragMaxRequestSize = 0xFFFF;
+	settings->MultifragMaxRequestSize = (flags & FREERDP_SETTINGS_SERVER_MODE) ?
+	                                    0 : 0xFFFF;
 	settings->GatewayUseSameCredentials = FALSE;
 	settings->GatewayBypassLocal = FALSE;
 	settings->GatewayRpcTransport = TRUE;
@@ -590,6 +606,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	if (!settings->SettingsModified)
 		goto out_fail;
 
+	settings->ActionScript = _strdup("~/.config/freerdp/action.sh");
 	return settings;
 out_fail:
 	free(settings->HomePath);
@@ -670,6 +687,7 @@ rdpSettings* freerdp_settings_clone(rdpSettings* settings)
 		CHECKED_STRDUP(GatewayUsername); /* 1987 */
 		CHECKED_STRDUP(GatewayPassword); /* 1988 */
 		CHECKED_STRDUP(GatewayDomain); /* 1989 */
+		CHECKED_STRDUP(ProxyHostname); /* 2016 */
 		CHECKED_STRDUP(RemoteApplicationName); /* 2113 */
 		CHECKED_STRDUP(RemoteApplicationIcon); /* 2114 */
 		CHECKED_STRDUP(RemoteApplicationProgram); /* 2115 */
@@ -678,6 +696,7 @@ rdpSettings* freerdp_settings_clone(rdpSettings* settings)
 		CHECKED_STRDUP(RemoteApplicationCmdLine); /* 2118 */
 		CHECKED_STRDUP(ImeFileName); /* 2628 */
 		CHECKED_STRDUP(DrivesToRedirect); /* 4290 */
+		CHECKED_STRDUP(ActionScript);
 		/**
 		  * Manual Code
 		  */
@@ -1078,6 +1097,7 @@ void freerdp_settings_free(rdpSettings* settings)
 	free(settings->DrivesToRedirect);
 	free(settings->WindowTitle);
 	free(settings->WmClass);
+	free(settings->ActionScript);
 	freerdp_target_net_addresses_free(settings);
 	freerdp_device_collection_free(settings);
 	freerdp_static_channel_collection_free(settings);

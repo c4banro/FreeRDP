@@ -97,7 +97,7 @@ BOOL xf_event_action_script_init(xfContext* xfc)
 		return FALSE;
 
 	ArrayList_Object(xfc->xevents)->fnObjectFree = free;
-	sprintf_s(command, sizeof(command), "%s xevent", xfc->actionScript);
+	sprintf_s(command, sizeof(command), "%s xevent", xfc->context.settings->ActionScript);
 	actionScript = popen(command, "r");
 
 	if (!actionScript)
@@ -140,7 +140,7 @@ static BOOL xf_event_execute_action_script(xfContext* xfc, XEvent* event)
 	char buffer[1024] = { 0 };
 	char command[1024] = { 0 };
 
-	if (!xfc->actionScript || !xfc->xevents)
+	if (!xfc->actionScriptExists || !xfc->xevents)
 		return FALSE;
 
 	if (event->type > (sizeof(X11_EVENT_STRINGS) / sizeof(const char*)))
@@ -164,7 +164,7 @@ static BOOL xf_event_execute_action_script(xfContext* xfc, XEvent* event)
 		return FALSE;
 
 	sprintf_s(command, sizeof(command), "%s xevent %s %lu",
-	          xfc->actionScript, xeventName, (unsigned long) xfc->window->handle);
+	          xfc->context.settings->ActionScript, xeventName, (unsigned long) xfc->window->handle);
 	actionScript = popen(command, "r");
 
 	if (!actionScript)
@@ -490,6 +490,8 @@ static BOOL xf_event_KeyPress(xfContext* xfc, XEvent* event, BOOL app)
 static BOOL xf_event_KeyRelease(xfContext* xfc, XEvent* event, BOOL app)
 {
 	XEvent nextEvent;
+	KeySym keysym;
+	char str[256];
 
 	if (XPending(xfc->display))
 	{
@@ -503,7 +505,8 @@ static BOOL xf_event_KeyRelease(xfContext* xfc, XEvent* event, BOOL app)
 		}
 	}
 
-	xf_keyboard_key_release(xfc, event->xkey.keycode);
+	XLookupString((XKeyEvent*) event, str, sizeof(str), &keysym, NULL);
+	xf_keyboard_key_release(xfc, event->xkey.keycode, keysym);
 	return TRUE;
 }
 

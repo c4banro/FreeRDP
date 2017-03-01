@@ -91,8 +91,6 @@ static void rfx_profiler_create(RFX_CONTEXT* context)
 	                "rfx_quantization_decode");
 	PROFILER_CREATE(context->priv->prof_rfx_dwt_2d_decode, "rfx_dwt_2d_decode");
 	PROFILER_CREATE(context->priv->prof_rfx_ycbcr_to_rgb, "prims->yCbCrToRGB");
-	PROFILER_CREATE(context->priv->prof_rfx_decode_format_rgb,
-	                "rfx_decode_format_rgb");
 	PROFILER_CREATE(context->priv->prof_rfx_encode_rgb, "rfx_encode_rgb");
 	PROFILER_CREATE(context->priv->prof_rfx_encode_component,
 	                "rfx_encode_component");
@@ -116,7 +114,6 @@ static void rfx_profiler_free(RFX_CONTEXT* context)
 	PROFILER_FREE(context->priv->prof_rfx_quantization_decode);
 	PROFILER_FREE(context->priv->prof_rfx_dwt_2d_decode);
 	PROFILER_FREE(context->priv->prof_rfx_ycbcr_to_rgb);
-	PROFILER_FREE(context->priv->prof_rfx_decode_format_rgb);
 	PROFILER_FREE(context->priv->prof_rfx_encode_rgb);
 	PROFILER_FREE(context->priv->prof_rfx_encode_component);
 	PROFILER_FREE(context->priv->prof_rfx_rlgr_encode);
@@ -137,7 +134,6 @@ static void rfx_profiler_print(RFX_CONTEXT* context)
 	PROFILER_PRINT(context->priv->prof_rfx_quantization_decode);
 	PROFILER_PRINT(context->priv->prof_rfx_dwt_2d_decode);
 	PROFILER_PRINT(context->priv->prof_rfx_ycbcr_to_rgb);
-	PROFILER_PRINT(context->priv->prof_rfx_decode_format_rgb);
 	PROFILER_PRINT(context->priv->prof_rfx_encode_rgb);
 	PROFILER_PRINT(context->priv->prof_rfx_encode_component);
 	PROFILER_PRINT(context->priv->prof_rfx_rlgr_encode);
@@ -171,7 +167,7 @@ static RFX_TILE* rfx_decoder_tile_new(void)
 	if (!(tile = (RFX_TILE*) calloc(1, sizeof(RFX_TILE))))
 		return NULL;
 
-	if (!(tile->data = (BYTE*) malloc(4 * 64 * 64)))
+	if (!(tile->data = (BYTE*) _aligned_malloc(4 * 64 * 64, 16)))
 	{
 		free(tile);
 		return NULL;
@@ -186,7 +182,7 @@ static void rfx_decoder_tile_free(RFX_TILE* tile)
 	if (tile)
 	{
 		if (tile->allocated)
-			free(tile->data);
+			_aligned_free(tile->data);
 
 		free(tile);
 	}
@@ -708,7 +704,8 @@ static BOOL rfx_process_message_region(RFX_CONTEXT* context,
 		Stream_Read_UINT16(s, rect->y); /* y (2 bytes) */
 		Stream_Read_UINT16(s, rect->width); /* width (2 bytes) */
 		Stream_Read_UINT16(s, rect->height); /* height (2 bytes) */
-		WLog_Print(context->priv->log, WLOG_DEBUG, "rect %d (x,y=%"PRIu16",%"PRIu16" w,h=%"PRIu16" %"PRIu16").", i,
+		WLog_Print(context->priv->log, WLOG_DEBUG,
+		           "rect %d (x,y=%"PRIu16",%"PRIu16" w,h=%"PRIu16" %"PRIu16").", i,
 		           rect->x, rect->y,
 		           rect->width, rect->height);
 	}
@@ -1153,16 +1150,17 @@ BOOL rfx_process_message(RFX_CONTEXT* context, const BYTE* data, UINT32 length,
 		REGION16 clippingRects;
 		const RECTANGLE_16* updateRects;
 		const DWORD formatSize = GetBytesPerPixel(context->pixel_format);
+		const UINT32 dstWidth = dstStride / formatSize;
 		region16_init(&clippingRects);
 
 		for (i = 0; i < message->numRects; i++)
 		{
 			RECTANGLE_16 clippingRect;
 			const RFX_RECT* rect = &(message->rects[i]);
-			clippingRect.left = left + rect->x;
-			clippingRect.top = top + rect->y;
-			clippingRect.right = clippingRect.left + rect->width;
-			clippingRect.bottom = clippingRect.top + rect->height;
+			clippingRect.left = MIN(left + rect->x, dstWidth);
+			clippingRect.top = MIN(top + rect->y, dstHeight);
+			clippingRect.right = MIN(clippingRect.left + rect->width, dstWidth);
+			clippingRect.bottom = MIN(clippingRect.top + rect->height, dstHeight);
 			region16_union_rect(&clippingRects, &clippingRects, &clippingRect);
 		}
 
@@ -1180,13 +1178,13 @@ BOOL rfx_process_message(RFX_CONTEXT* context, const BYTE* data, UINT32 length,
 
 			for (j = 0; j < nbUpdateRects; j++)
 			{
-				UINT32 stride = 64 * formatSize;
-				UINT32 nXDst = updateRects[j].left;
-				UINT32 nYDst = updateRects[j].top;
-				UINT32 nXSrc = nXDst - updateRect.left;
-				UINT32 nYSrc = nYDst - updateRect.top;
-				UINT32 nWidth = MIN(64, updateRects[j].right - updateRects[j].left);
-				UINT32 nHeight = MIN(64, updateRects[j].bottom - updateRects[j].top);
+				const UINT32 stride = 64 * formatSize;
+				const UINT32 nXDst = updateRects[j].left;
+				const UINT32 nYDst = updateRects[j].top;
+				const UINT32 nXSrc = nXDst - updateRect.left;
+				const UINT32 nYSrc = nYDst - updateRect.top;
+				const UINT32 nWidth = updateRects[j].right - updateRects[j].left;
+				const UINT32 nHeight = updateRects[j].bottom - updateRects[j].top;
 
 				if (!freerdp_image_copy(dst, dstFormat, dstStride,
 				                        nXDst, nYDst, nWidth, nHeight,

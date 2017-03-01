@@ -178,17 +178,6 @@ BOOL rdp_client_connect(rdpRdp* rdp)
 	BOOL status;
 	rdpSettings* settings = rdp->settings;
 
-	if (rdp->settingsCopy)
-	{
-		freerdp_settings_free(rdp->settingsCopy);
-		rdp->settingsCopy = NULL;
-	}
-
-	rdp->settingsCopy = freerdp_settings_clone(settings);
-
-	if (!rdp->settingsCopy)
-		return FALSE;
-
 	nego_init(rdp->nego);
 	nego_set_target(rdp->nego, settings->ServerHostname, settings->ServerPort);
 
@@ -312,12 +301,6 @@ BOOL rdp_client_connect(rdpRdp* rdp)
 BOOL rdp_client_disconnect(rdpRdp* rdp)
 {
 	BOOL status;
-
-	if (rdp->settingsCopy)
-	{
-		freerdp_settings_free(rdp->settingsCopy);
-		rdp->settingsCopy = NULL;
-	}
 
 	status = nego_disconnect(rdp->nego);
 
@@ -1162,10 +1145,15 @@ BOOL rdp_server_accept_mcs_channel_join_request(rdpRdp* rdp, wStream* s)
 
 BOOL rdp_server_accept_confirm_active(rdpRdp* rdp, wStream* s)
 {
+	freerdp_peer *peer = rdp->context->peer;
+
 	if (rdp->state != CONNECTION_STATE_CAPABILITIES_EXCHANGE)
 		return FALSE;
 
 	if (!rdp_recv_confirm_active(rdp, s))
+		return FALSE;
+
+	if (peer->ClientCapabilities && !peer->ClientCapabilities(peer))
 		return FALSE;
 
 	if (rdp->settings->SaltedChecksum)

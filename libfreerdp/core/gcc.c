@@ -836,6 +836,9 @@ BOOL gcc_read_client_core_data(wStream* s, rdpMcs* mcs, UINT16 blockLength)
 		settings->SupportMonitorLayoutPdu = (earlyCapabilityFlags &
 		                                     RNS_UD_CS_SUPPORT_MONITOR_LAYOUT_PDU) ? TRUE : FALSE;
 
+	if (settings->SupportStatusInfoPdu)
+		settings->SupportStatusInfoPdu = (earlyCapabilityFlags & RNS_UD_CS_SUPPORT_STATUSINFO_PDU) ? TRUE : FALSE;
+
 	if (!(earlyCapabilityFlags & RNS_UD_CS_VALID_CONNECTION_TYPE))
 		connectionType = 0;
 
@@ -936,6 +939,9 @@ void gcc_write_client_core_data(wStream* s, rdpMcs* mcs)
 
 	if (settings->SupportMonitorLayoutPdu)
 		earlyCapabilityFlags |= RNS_UD_CS_SUPPORT_MONITOR_LAYOUT_PDU;
+
+	if (settings->SupportStatusInfoPdu)
+		earlyCapabilityFlags |= RNS_UD_CS_SUPPORT_STATUSINFO_PDU;
 
 	Stream_Write_UINT16(s, highColorDepth); /* highColorDepth */
 	Stream_Write_UINT16(s, supportedColorDepths); /* supportedColorDepths */
@@ -1698,6 +1704,16 @@ BOOL gcc_read_client_monitor_data(wStream* s, rdpMcs* mcs, UINT16 blockLength)
 
 	Stream_Read_UINT32(s, flags); /* flags */
 	Stream_Read_UINT32(s, monitorCount); /* monitorCount */
+
+	/* 2.2.1.3.6 Client Monitor Data -
+	 * monitorCount (4 bytes): A 32-bit, unsigned integer. The number of display
+	 * monitor definitions in the monitorDefArray field (the maximum allowed is 16).
+	 */
+	if (monitorCount > 16)
+	{
+		WLog_ERR(TAG, "announced monitors(%"PRIu32") exceed the 16 limit", monitorCount);
+		return FALSE;
+	}
 
 	if (monitorCount > settings->MonitorDefArraySize)
 	{

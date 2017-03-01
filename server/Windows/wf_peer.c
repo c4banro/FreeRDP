@@ -40,6 +40,8 @@
 #include "wf_peer.h"
 #include <freerdp/peer.h>
 
+#define TAG SERVER_TAG("windows")
+
 #define SERVER_KEY "Software\\"FREERDP_VENDOR_STRING"\\" \
 	FREERDP_PRODUCT_STRING
 
@@ -279,10 +281,10 @@ DWORD WINAPI wf_peer_main_loop(LPVOID lpParam)
 	if (!client->Initialize(client))
 		goto fail_client_initialize;
 
+	context = (wfPeerContext*) client->context;
+	
 	if (context->socketClose)
 		goto fail_socked_closed;
-
-	context = (wfPeerContext*) client->context;
 
 	wfi = context->info;
 

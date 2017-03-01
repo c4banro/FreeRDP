@@ -375,8 +375,8 @@ static BOOL xf_sw_desktop_resize(rdpContext* context)
 	}
 
 	if (!(xfc->image = XCreateImage(xfc->display, xfc->visual, xfc->depth, ZPixmap,
-	                                0,
-	                                (char*) gdi->primary_buffer, gdi->width, gdi->height, xfc->scanline_pad, 0)))
+	                                0, (char*)gdi->primary_buffer, gdi->width,
+	                                gdi->height, xfc->scanline_pad, gdi->stride)))
 	{
 		goto out;
 	}
@@ -627,7 +627,7 @@ BOOL xf_create_window(xfContext* xfc)
 		                          xfc->depth,
 		                          ZPixmap, 0, (char*) gdi->primary_buffer,
 		                          settings->DesktopWidth, settings->DesktopHeight,
-		                          xfc->scanline_pad, 0);
+		                          xfc->scanline_pad, gdi->stride);
 	}
 
 	return TRUE;
@@ -1410,7 +1410,7 @@ static BOOL xf_auto_reconnect(freerdp* instance)
 	while (TRUE)
 	{
 		/* Quit retrying if max retries has been exceeded */
-		if (numRetries++ >= maxRetries)
+		if ((maxRetries > 0) && (numRetries++ >= maxRetries))
 		{
 			return FALSE;
 		}
