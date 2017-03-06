@@ -151,7 +151,20 @@ BOOL nego_connect(rdpNego* nego)
 	{
 		do
 		{
-			WLog_DBG(TAG, "state: %s", NEGO_STATE_STRINGS[nego->state]);
+			if ( !nego->TcpConnected )
+			{
+				if ( nego->SendPreconnectionPdu )
+				{
+					if ( !nego_send_preconnection_pdu( nego ) )
+					{
+						WLog_ERR( TAG, "Failed to send preconnection pdu" );
+						nego->state = NEGO_STATE_FINAL;
+						return FALSE;
+					}
+				}
+			}
+
+			WLog_DBG( TAG, "state: %s", NEGO_STATE_STRINGS[nego->state] );
 
 			nego_send(nego);
 
@@ -342,9 +355,10 @@ BOOL nego_send_preconnection_pdu(rdpNego* nego)
 	Stream_Write_UINT32(s, cbSize); /* cbSize */
 	Stream_Write_UINT32(s, 0); /* Flags */
 	Stream_Write_UINT32(s, PRECONNECTION_PDU_V2); /* Version */
-	Stream_Write_UINT32(s, nego->PreconnectionId); /* Id */
-	Stream_Write_UINT16(s, cchPCB); /* cchPCB */
 
+	Stream_Write_UINT32(s, nego->PreconnectionId); /* Id */
+
+	Stream_Write_UINT16(s, cchPCB); /* cchPCB */
 	if (wszPCB)
 	{
 		Stream_Write(s, wszPCB, cchPCB * 2); /* wszPCB */
@@ -857,7 +871,7 @@ BOOL nego_send_negotiation_request(rdpNego* nego)
 
 	WLog_DBG(TAG, "RequestedProtocols: %"PRIu32"", nego->RequestedProtocols);
 
-	if ((nego->RequestedProtocols > PROTOCOL_RDP) || (nego->sendNegoData))
+	if ( (nego->RequestedProtocols > PROTOCOL_RDP) || (nego->sendNegoData))
 	{
 		/* RDP_NEG_DATA must be present for TLS and NLA */
 
