@@ -134,6 +134,31 @@ void freerdp_channel_remove_open_handle_data(rdpChannelHandles* handles, DWORD o
 	}
 }
 
+
+
+FREERDP_API BOOL freerdp_prepare_reverse_connect( freerdp* instance )
+{
+	if ( !instance || !instance->context )
+		return FALSE;
+
+	instance->context->wdsReverseConnection = freerdp_wds_reverse_connect_new();
+	if ( !instance->context->wdsReverseConnection )
+		return FALSE;
+
+	return 0 != freerdp_wds_prepare_reverse_connect( instance->context->wdsReverseConnection );
+}
+
+
+FREERDP_API BOOL freerdp_get_reverse_connectionstring( freerdp* instance, rdpWdsConnectionstring* connectionString )
+{
+	if ( !instance || !instance->context || !instance->context->wdsReverseConnection || !connectionString )
+		return FALSE;
+
+	return 0 != freerdp_wds_connectionstring_fill_from_reverse_connection( connectionString, instance->context->wdsReverseConnection );
+}
+
+
+
 /** Creates a new connection based on the settings found in the "instance" parameter
  *  It will use the callbacks registered on the structure to process the pre/post connect operations
  *  that the caller requires.
@@ -161,6 +186,21 @@ BOOL freerdp_connect(freerdp* instance)
 	freerdp_set_last_error(instance->context, FREERDP_ERROR_SUCCESS);
 	clearChannelError(instance->context);
 	ResetEvent(instance->context->abortEvent);
+
+
+	/* handle reverse connect */
+	if ( instance->context->wdsReverseConnection )
+	{
+		if ( 0 > freerdp_wds_wait_for_connect( instance->context->wdsReverseConnection, instance->context->abortEvent ) )
+		{
+			//abort called
+			freerdp_set_last_error( instance->context, FREERDP_ERROR_CONNECT_CANCELLED );
+			return FALSE;
+		}
+		if ( 0 > freerdp_wds_update_settings_after_reverse_connect( instance->context->wdsReverseConnection, instance->settings ) )
+			return FALSE;
+	}
+
 	rdp = instance->context->rdp;
 	settings = instance->settings;
 	instance->context->codecs = codecs_new(instance->context);
@@ -718,6 +758,8 @@ void freerdp_context_free(freerdp* instance)
 	CloseHandle(instance->context->abortEvent);
 	instance->context->abortEvent = NULL;
 	freerdp_channels_free(instance->context->channels);
+	freerdp_wds_reverse_connect_free( instance->context->wdsReverseConnection );
+	instance->context->wdsReverseConnection = NULL;
 	free(instance->context);
 	instance->context = NULL;
 }

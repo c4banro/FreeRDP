@@ -607,6 +607,9 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 		goto out_fail;
 
 	settings->ActionScript = _strdup("~/.config/freerdp/action.sh");
+
+	settings->WdsReverseConnect = FALSE;
+	settings->WdsReverseConnectFile = NULL;
 	return settings;
 out_fail:
 	free(settings->HomePath);
@@ -697,6 +700,7 @@ rdpSettings* freerdp_settings_clone(rdpSettings* settings)
 		CHECKED_STRDUP(ImeFileName); /* 2628 */
 		CHECKED_STRDUP(DrivesToRedirect); /* 4290 */
 		CHECKED_STRDUP(ActionScript);
+		CHECKED_STRDUP(WdsReverseConnectFile);
 		/**
 		  * Manual Code
 		  */
@@ -714,6 +718,7 @@ rdpSettings* freerdp_settings_clone(rdpSettings* settings)
 		_settings->TargetNetAddressCount = 0;
 		_settings->TargetNetAddresses = NULL;
 		_settings->TargetNetPorts = NULL;
+		_settings->WdsReverseConnect = settings->WdsReverseConnect;
 
 		if (settings->LoadBalanceInfo && settings->LoadBalanceInfoLength)
 		{
@@ -1103,6 +1108,8 @@ void freerdp_settings_free(rdpSettings* settings)
 	freerdp_static_channel_collection_free(settings);
 	freerdp_dynamic_channel_collection_free(settings);
 	free(settings->SettingsModified);
+	if ( settings->WdsReverseConnectFile )
+		free( settings->WdsReverseConnectFile );
 	free(settings);
 }
 

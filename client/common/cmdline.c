@@ -31,11 +31,12 @@
 #include <winpr/cmdline.h>
 
 #include <freerdp/addin.h>
+#include <freerdp/wds.h>
+
 #include <freerdp/settings.h>
 #include <freerdp/client/channels.h>
 #include <freerdp/crypto/crypto.h>
 #include <freerdp/locale/keyboard.h>
-
 
 #include <freerdp/client/cmdline.h>
 #include <freerdp/version.h>
@@ -188,6 +189,10 @@ static COMMAND_LINE_ARGUMENT_A args[] =
 	{ "scale-desktop", COMMAND_LINE_VALUE_REQUIRED, "<scale amount (%%)>", "100", NULL, -1, NULL, "Scaling factor for desktop applications (value between 100 and 500)" },
 	{ "scale-device", COMMAND_LINE_VALUE_REQUIRED, "<scale amount (%%)>", "100", NULL, -1, NULL, "Scaling factor for app store applications (100, 140, or 180)" },
 	{ "action-script", COMMAND_LINE_VALUE_REQUIRED, "<file name>", "~/.config/freerdp/action.sh", NULL, -1, NULL, "Action script" },
+	{ "wds-connectionstring", COMMAND_LINE_VALUE_REQUIRED, "<file name>", NULL, NULL, -1, NULL, "Connect to wds-presenter using connection string in file" },
+	{ "wds-reverseconnect", COMMAND_LINE_VALUE_REQUIRED, "<file name>", NULL, NULL, -1, NULL, "open socket for reverse connect, storing connection string for presenter in file" },
+	{ "wds-username", COMMAND_LINE_VALUE_REQUIRED, "<user name>", NULL, NULL, -1, NULL, "name of wds-viewer" },
+	{ "wds-password", COMMAND_LINE_VALUE_REQUIRED, "<password>", NULL, NULL, -1, NULL, "password to connect to wds-sharer" },
 	{ NULL, 0, NULL, NULL, NULL, -1, NULL, NULL }
 };
 
@@ -2526,6 +2531,36 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings,
 			free (settings->ActionScript);
 			if (!(settings->ActionScript = _strdup(arg->Value)))
 				return COMMAND_LINE_ERROR_MEMORY;
+		}
+		CommandLineSwitchCase( arg, "wds-connectionstring" )
+		{
+			rdpWdsConnectionstring* wdsCs = freerdp_wds_connectionstring_new();
+			if ( !wdsCs )
+				return COMMAND_LINE_ERROR_MEMORY;
+
+			if ( freerdp_wds_connectionstring_parse_file( wdsCs, arg->Value ) < 0 )
+			{
+				freerdp_wds_connectionstring_free( wdsCs );
+				WLog_ERR( TAG, "Can't parse windows desktop sharing file %s", arg->Value );
+				return COMMAND_LINE_ERROR;
+			}
+
+			freerdp_client_populate_settings_from_wds_connectionstring( wdsCs, settings );
+
+			freerdp_wds_connectionstring_free( wdsCs );
+		}
+		CommandLineSwitchCase( arg, "wds-reverseconnect" )
+		{
+			settings->WdsReverseConnectFile = _strdup( arg->Value );
+			settings->WdsReverseConnect = TRUE;
+		}
+		CommandLineSwitchCase( arg, "wds-username" )
+		{
+			freerdp_set_param_string( settings, FreeRDP_Username, arg->Value );
+		}
+		CommandLineSwitchCase( arg, "wds-password" )
+		{
+			freerdp_set_param_string( settings, FreeRDP_RemoteAssistancePassword, arg->Value );
 		}
 		CommandLineSwitchDefault(arg)
 		{

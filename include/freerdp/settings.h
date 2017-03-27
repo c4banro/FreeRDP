@@ -1435,6 +1435,9 @@ struct rdp_settings
 	ALIGN64 BYTE*
 	SettingsModified; /* byte array marking fields that have been modified from their default value */
 	ALIGN64 char* ActionScript;
+
+	ALIGN64 BOOL WdsReverseConnect;
+	ALIGN64 char* WdsReverseConnectFile;
 };
 typedef struct rdp_settings rdpSettings;
 

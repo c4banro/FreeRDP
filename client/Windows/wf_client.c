@@ -633,6 +633,16 @@ static DWORD WINAPI wf_client_thread(LPVOID lpParam)
 	context = instance->context;
 	wfc = (wfContext*) instance->context;
 
+	if ( instance->settings->WdsReverseConnect && instance->settings->WdsReverseConnectFile )
+	{
+		if ( !freerdp_prepare_reverse_connect( instance ) )
+			return 0;
+
+		rdpWdsConnectionstring* pReverseCS = freerdp_wds_connectionstring_new();
+		freerdp_get_reverse_connectionstring( instance, pReverseCS );
+		freerdp_wds_connectionstring_write_to_file( pReverseCS, instance->settings->WdsReverseConnectFile );
+	}
+
 	if (!freerdp_connect(instance))
 		return 0;
 

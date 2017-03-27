@@ -47,6 +47,7 @@ typedef RDP_CLIENT_ENTRY_POINTS_V1 RDP_CLIENT_ENTRY_POINTS;
 #include <freerdp/metrics.h>
 #include <freerdp/settings.h>
 #include <freerdp/extension.h>
+#include <freerdp/wds.h>
 
 #include <winpr/stream.h>
 
@@ -179,7 +180,8 @@ struct rdp_context
 	ALIGN64 rdpCodecs* codecs; /* 42 */
 	ALIGN64 rdpAutoDetect* autodetect; /* 43 */
 	ALIGN64 HANDLE abortEvent; /* 44 */
-	UINT64 paddingC[64 - 45]; /* 45 */
+	ALIGN64 rdpWdsReverseConnection* wdsReverseConnection; /* 45 */
+	UINT64 paddingC[64 - 46]; /* 46 */
 
 	UINT64 paddingD[96 - 64]; /* 64 */
 	UINT64 paddingE[128 - 96]; /* 96 */
@@ -300,6 +302,9 @@ typedef struct rdp_channel_handles rdpChannelHandles;
 
 FREERDP_API BOOL freerdp_context_new(freerdp* instance);
 FREERDP_API void freerdp_context_free(freerdp* instance);
+
+FREERDP_API BOOL freerdp_prepare_reverse_connect( freerdp* instance );
+FREERDP_API BOOL freerdp_get_reverse_connectionstring( freerdp* instance, rdpWdsConnectionstring* connectionString );
 
 FREERDP_API BOOL freerdp_connect(freerdp* instance);
 FREERDP_API BOOL freerdp_abort_connect(freerdp* instance);
