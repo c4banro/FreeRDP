@@ -278,6 +278,10 @@ FREERDP_API int freerdp_wds_connectionstring_parse_string( rdpWdsConnectionstrin
 		q[0] = '\0';
 		q++;
 
+		char* r = strrchr( p, '%' );
+		if ( r )
+			r[0] = '\0';
+
 		length = strlen( p );
 
 		if ( connectionString->MachineAddresses[lNodeCount] )
