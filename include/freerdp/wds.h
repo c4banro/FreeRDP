@@ -21,8 +21,8 @@
 #define FREERDP_WDS_H
 
 #include <freerdp/api.h>
+#include <freerdp/settings.h>
 
-struct rdpSettings;
 
 struct rdp_wds_connectionstring
 {
