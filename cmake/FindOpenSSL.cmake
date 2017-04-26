@@ -30,6 +30,7 @@ if (UNIX AND NOT ANDROID)
 endif (UNIX AND NOT ANDROID)
 
 # http://www.slproweb.com/products/Win32OpenSSL.html
+
 SET(_OPENSSL_ROOT_HINTS
   $ENV{OPENSSL_ROOT_DIR}
   ${OPENSSL_ROOT_DIR}
@@ -64,11 +65,19 @@ FIND_PATH(OPENSSL_INCLUDE_DIR
 )
 
 IF(WIN32)
-  if(${MSVC_RUNTIME} STREQUAL "static")
-    set(MSVC_RUNTIME_SUFFIX "MT")
-  else()
-    set(MSVC_RUNTIME_SUFFIX "MD")
-  endif()
+    if("${CMAKE_SIZEOF_VOID_P}" EQUAL "8") 
+       # x64 target
+       set(MSVC_RUNTIME_SUFFIX_BIT "64")
+    else("${CMAKE_SIZEOF_VOID_P}" EQUAL "8") 
+       # x86 target
+       set(MSVC_RUNTIME_SUFFIX_BIT "32")
+    endif("${CMAKE_SIZEOF_VOID_P}" EQUAL "8") 
+
+    if(${MSVC_RUNTIME} STREQUAL "static")
+      set(MSVC_RUNTIME_SUFFIX "MT")
+    else()
+      set(MSVC_RUNTIME_SUFFIX "MD")
+    endif()
 ENDIF(WIN32)
 
 IF(ANDROID)
@@ -98,16 +107,16 @@ ELSEIF(WIN32 AND NOT CYGWIN)
     # ssleay32MD.lib is identical to ../ssleay32.lib
 
     if(DEFINED OPENSSL_STATIC)
-      set(MSVC_RUNTIME_PATH_SUFFIX "lib/VC/static")
+       set(MSVC_RUNTIME_PATH_SUFFIX "lib/VC/static")
     else()
       set(MSVC_RUNTIME_PATH_SUFFIX "")
     endif()
 
     FIND_LIBRARY(LIB_EAY_DEBUG
       NAMES
-        "libeay32${MSVC_RUNTIME_SUFFIX}d"
-        "libcrypto32${MSVC_RUNTIME_SUFFIX}d"
-        libeay32
+        "libeay${MSVC_RUNTIME_SUFFIX_BIT}${MSVC_RUNTIME_SUFFIX}d"
+        "libcrypto${MSVC_RUNTIME_SUFFIX_BIT}${MSVC_RUNTIME_SUFFIX}d"
+        "libeay${MSVC_RUNTIME_SUFFIX_BIT}"
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
         ${MSVC_RUNTIME_PATH_SUFFIX}
@@ -118,10 +127,9 @@ ELSEIF(WIN32 AND NOT CYGWIN)
 
     FIND_LIBRARY(LIB_EAY_RELEASE
       NAMES
-        "libeay32${MSVC_RUNTIME_SUFFIX}"
-        "libcrypto32${MSVC_RUNTIME_SUFFIX}"
-        "libcrypto64${MSVC_RUNTIME_SUFFIX}"
-        libeay32
+        "libeay${MSVC_RUNTIME_SUFFIX_BIT}${MSVC_RUNTIME_SUFFIX}"
+        "libcrypto${MSVC_RUNTIME_SUFFIX_BIT}${MSVC_RUNTIME_SUFFIX}"
+        "libeay${MSVC_RUNTIME_SUFFIX_BIT}"
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
         ${MSVC_RUNTIME_PATH_SUFFIX}
@@ -132,10 +140,9 @@ ELSEIF(WIN32 AND NOT CYGWIN)
 
     FIND_LIBRARY(SSL_EAY_DEBUG
       NAMES
-        "ssleay32${MSVC_RUNTIME_SUFFIX}d"
-		"libssl32${MSVC_RUNTIME_SUFFIX}d"
-		"libssl64${MSVC_RUNTIME_SUFFIX}d"
-        ssleay32
+        "ssleay${MSVC_RUNTIME_SUFFIX_BIT}${MSVC_RUNTIME_SUFFIX}d"
+	"libssl${MSVC_RUNTIME_SUFFIX_BIT}${MSVC_RUNTIME_SUFFIX}d"
+        "ssleay${MSVC_RUNTIME_SUFFIX_BIT}"
         ssl
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
@@ -147,10 +154,9 @@ ELSEIF(WIN32 AND NOT CYGWIN)
 
     FIND_LIBRARY(SSL_EAY_RELEASE
       NAMES
-        "ssleay32${MSVC_RUNTIME_SUFFIX}"
-		"libssl32${MSVC_RUNTIME_SUFFIX}"
-		"libssl64${MSVC_RUNTIME_SUFFIX}"
-        ssleay32
+        "ssleay${MSVC_RUNTIME_SUFFIX_BIT}${MSVC_RUNTIME_SUFFIX}"
+	"libssl${MSVC_RUNTIME_SUFFIX_BIT}${MSVC_RUNTIME_SUFFIX}"
+        "ssleay${MSVC_RUNTIME_SUFFIX_BIT}"
         ssl
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
