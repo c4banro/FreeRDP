@@ -36,10 +36,10 @@ static BOOL similarRGB(const BYTE* src, const BYTE* dst, size_t size, UINT32 for
 {
 	size_t x;
 	const UINT32 bpp = GetBytesPerPixel(format);
-	const BOOL alpha = ColorHasAlpha(format);
 
 	for (x = 0; x < size; x++)
 	{
+		const double maxDiff = 4.0;
 		UINT32 sColor, dColor;
 		BYTE sR, sG, sB, sA;
 		BYTE dR, dG, dB, dA;
@@ -48,30 +48,19 @@ static BOOL similarRGB(const BYTE* src, const BYTE* dst, size_t size, UINT32 for
 		src += bpp;
 		dst += bpp;
 		SplitColor(sColor, format, &sR, &sG, &sB, &sA, NULL);
-		SplitColor(sColor, format, &dR, &dG, &dB, &dA, NULL);
+		SplitColor(dColor, format, &dR, &dG, &dB, &dA, NULL);
 
-		if ((abs(sR - dR) > 2) || (abs(sG - dG) > 2) || (abs(sB - dB) > 2))
+		if ((abs(sR - dR) > maxDiff) || (abs(sG - dG) > maxDiff) || (abs(sB - dB) > maxDiff))
 		{
 			fprintf(stderr, "Color value  mismatch R[%02X %02X], G[%02X %02X], B[%02X %02X] at position %lu",
 			        sR, dR, sG, dG, sA, dA, x);
 			return FALSE;
 		}
 
-		if (alpha)
+		if (dA != 0xFF)
 		{
-			if (abs(sA - dA) > 2)
-			{
-				fprintf(stderr, "Alpha value  mismatch %02X %02X at position %lu", sA, dA, x);
-				return FALSE;
-			}
-		}
-		else
-		{
-			if (dA != 0xFF)
-			{
-				fprintf(stderr, "Invalid destination alpha value %02X at position %lu", dA, x);
-				return FALSE;
-			}
+			fprintf(stderr, "Invalid destination alpha value %02X at position %lu", dA, x);
+			return FALSE;
 		}
 	}
 
@@ -186,6 +175,7 @@ static BOOL TestPrimitiveYUVCombine(primitives_t* prims, prim_size_t roi)
 	UINT32 chromaStride[3];
 	UINT32 yuvStride[3];
 	size_t padding = 10000;
+	RECTANGLE_16 rect;
 	PROFILER_DEFINE(yuvCombine);
 	PROFILER_DEFINE(yuvSplit);
 	awidth = roi.width + 16 - roi.width % 16;
@@ -194,6 +184,10 @@ static BOOL TestPrimitiveYUVCombine(primitives_t* prims, prim_size_t roi)
 	        roi.width, roi.height, awidth, aheight);
 	PROFILER_CREATE(yuvCombine, "YUV420CombineToYUV444");
 	PROFILER_CREATE(yuvSplit, "YUV444SplitToYUV420");
+	rect.left = 0;
+	rect.top = 0;
+	rect.right = roi.width;
+	rect.bottom = roi.height;
 
 	if (!prims || !prims->YUV420CombineToYUV444)
 		goto fail;
@@ -245,9 +239,19 @@ static BOOL TestPrimitiveYUVCombine(primitives_t* prims, prim_size_t roi)
 
 	PROFILER_ENTER(yuvCombine);
 
-	if (prims->YUV420CombineToYUV444((const BYTE**)luma, lumaStride,
+	if (prims->YUV420CombineToYUV444(AVC444_LUMA,
+	                                 (const BYTE**)luma, lumaStride,
+	                                 roi.width, roi.height,
+	                                 yuv, yuvStride, &rect) != PRIMITIVES_SUCCESS)
+	{
+		PROFILER_EXIT(yuvCombine);
+		goto fail;
+	}
+
+	if (prims->YUV420CombineToYUV444(AVC444_CHROMAv1,
 	                                 (const BYTE**)chroma, chromaStride,
-	                                 yuv, yuvStride, &roi) != PRIMITIVES_SUCCESS)
+	                                 roi.width, roi.height,
+	                                 yuv, yuvStride, &rect) != PRIMITIVES_SUCCESS)
 	{
 		PROFILER_EXIT(yuvCombine);
 		goto fail;

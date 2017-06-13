@@ -336,6 +336,18 @@ static const char* get_shm_id()
 	return shm_id;
 }
 
+Window xf_CreateDummyWindow(xfContext *xfc)
+{
+	return XCreateSimpleWindow(xfc->display, DefaultRootWindow(xfc->display),
+			0, 0, 1, 1, 0, 0, 0);
+}
+
+void xf_DestroyDummyWindow(xfContext *xfc, Window window)
+{
+	if (window)
+		XDestroyWindow(xfc->display, window);
+}
+
 xfWindow* xf_CreateDesktopWindow(xfContext* xfc, char* name, int width,
                                  int height)
 {
@@ -521,7 +533,7 @@ void xf_SetWindowStyle(xfContext* xfc, xfAppWindow* appWindow, UINT32 style,
 {
 	Atom window_type;
 
-	if (/*(ex_style & WS_EX_TOPMOST) ||*/ (ex_style & WS_EX_TOOLWINDOW))
+	if ((ex_style & WS_EX_NOACTIVATE) || (ex_style & WS_EX_TOOLWINDOW))
 	{
 		/*
 		 * Tooltips and menu items should be unmanaged windows

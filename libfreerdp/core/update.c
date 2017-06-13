@@ -631,6 +631,8 @@ void update_post_disconnect(rdpUpdate* update)
 
 	if (update->asynchronous)
 		update_message_proxy_free(update->proxy);
+
+	update->initialState = TRUE;
 }
 
 static BOOL update_begin_paint(rdpContext* context)
@@ -1714,7 +1716,12 @@ static BOOL update_send_switch_surface_order(
 	BYTE orderType;
 	BYTE controlFlags;
 	int headerLength;
-	rdpUpdate* update = context->update;
+	rdpUpdate* update;
+
+	if (!context || !switch_surface || !context->update)
+		return FALSE;
+
+	update = context->update;
 	headerLength = 1;
 	orderType = ORDER_TYPE_SWITCH_SURFACE;
 	controlFlags = ORDER_SECONDARY | (orderType << 2);
@@ -1955,6 +1962,27 @@ static BOOL update_send_set_keyboard_indicators(rdpContext* context,
 	return ret;
 }
 
+static BOOL update_send_set_keyboard_ime_status(rdpContext* context,
+        UINT16 imeId, UINT32 imeState, UINT32 imeConvMode)
+{
+	wStream* s;
+	rdpRdp* rdp = context->rdp;
+	BOOL ret;
+	s = rdp_data_pdu_init(rdp);
+
+	if (!s)
+		return FALSE;
+
+	/* unitId should be 0 according to MS-RDPBCGR 2.2.8.2.2.1 */
+	Stream_Write_UINT16(s, imeId);
+	Stream_Write_UINT32(s, imeState);
+	Stream_Write_UINT32(s, imeConvMode);
+	ret = rdp_send_data_pdu(rdp, s, DATA_PDU_TYPE_SET_KEYBOARD_IME_STATUS,
+	                        rdp->mcs->userId);
+	Stream_Release(s);
+	return ret;
+}
+
 void update_register_server_callbacks(rdpUpdate* update)
 {
 	update->BeginPaint = update_begin_paint;
@@ -1969,6 +1997,7 @@ void update_register_server_callbacks(rdpUpdate* update)
 	update->SurfaceFrameBits = update_send_surface_frame_bits;
 	update->PlaySound = update_send_play_sound;
 	update->SetKeyboardIndicators = update_send_set_keyboard_indicators;
+	update->SetKeyboardImeStatus = update_send_set_keyboard_ime_status;
 	update->SaveSessionInfo = rdp_send_save_session_info;
 	update->primary->DstBlt = update_send_dstblt;
 	update->primary->PatBlt = update_send_patblt;

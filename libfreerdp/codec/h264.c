@@ -65,6 +65,37 @@ static H264_CONTEXT_SUBSYSTEM g_Subsystem_dummy =
 	dummy_compress
 };
 
+static BOOL avc420_ensure_buffer(H264_CONTEXT* h264, UINT32 stride, UINT32 width, UINT32 height)
+{
+	if (!h264)
+		return FALSE;
+
+	if (stride == 0)
+		stride = width;
+
+	if (!h264->pYUVData[0] || !h264->pYUVData[1] || !h264->pYUVData[2] ||
+		(width != h264->width) || (height != h264->height) || (stride != h264->iStride[0]))
+	{
+		h264->iStride[0] = stride;
+		h264->iStride[1] = (stride + 1) / 2;
+		h264->iStride[2] = (stride + 1) / 2;
+		h264->width = width;
+		h264->height = height;
+
+		_aligned_free(h264->pYUVData[0]);
+		_aligned_free(h264->pYUVData[1]);
+		_aligned_free(h264->pYUVData[2]);
+		h264->pYUVData[0] = _aligned_malloc(h264->iStride[0] * height, 16);
+		h264->pYUVData[1] = _aligned_malloc(h264->iStride[1] * height, 16);
+		h264->pYUVData[2] = _aligned_malloc(h264->iStride[2] * height, 16);
+
+		if (!h264->pYUVData[0] || !h264->pYUVData[1] || !h264->pYUVData[2])
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
 /**
  * Media Foundation subsystem
  */
@@ -266,7 +297,7 @@ error:
 	return hr;
 }
 
-static int mf_decompress(H264_CONTEXT* h264, BYTE* pSrcData, UINT32 SrcSize)
+static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSize)
 {
 	HRESULT hr;
 	BYTE* pbBuffer = NULL;
@@ -356,11 +387,8 @@ static int mf_decompress(H264_CONTEXT* h264, BYTE* pSrcData, UINT32 SrcSize)
 
 	if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
 	{
-		BYTE* pTmpYUVData;
-		int offset = 0;
 		UINT32 stride = 0;
 		UINT64 frameSize = 0;
-		IMFAttributes* attributes = NULL;
 
 		if (sys->outputType)
 		{
@@ -413,18 +441,8 @@ static int mf_decompress(H264_CONTEXT* h264, BYTE* pSrcData, UINT32 SrcSize)
 			goto error;
 		}
 
-		iStride[0] = stride;
-		iStride[1] = stride / 2;
-		iStride[2] = stride / 2;
-		pTmpYUVData = (BYTE*) calloc(1, 2 * stride * sys->frameHeight);
-		pYUVData[0] = &pTmpYUVData[offset];
-		pTmpYUVData += iStride[0] * sys->frameHeight;
-		pYUVData[1] = &pTmpYUVData[offset];
-		pTmpYUVData += iStride[1] * (sys->frameHeight / 2);
-		pYUVData[2] = &pTmpYUVData[offset];
-		pTmpYUVData += iStride[2] * (sys->frameHeight / 2);
-		h264->width = sys->frameWidth;
-		h264->height = sys->frameHeight;
+		if (!avc420_ensure_buffer(h264, stride, sys->frameWidth, sys->frameHeight))
+			goto error;
 	}
 	else if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
 	{
@@ -541,7 +559,7 @@ static void mf_uninit(H264_CONTEXT* h264)
 		}
 
 		for (x = 0; x < sizeof(h264->pYUVData) / sizeof(h264->pYUVData[0]); x++)
-			free(h264->pYUVData[x]);
+			_aligned_free(h264->pYUVData[x]);
 
 		memset(h264->pYUVData, 0, sizeof(h264->pYUVData));
 		memset(h264->iStride, 0, sizeof(h264->iStride));
@@ -555,8 +573,7 @@ static void mf_uninit(H264_CONTEXT* h264)
 static BOOL mf_init(H264_CONTEXT* h264)
 {
 	HRESULT hr;
-	H264_CONTEXT_MF* sys;
-	sys = (H264_CONTEXT_MF*) calloc(1, sizeof(H264_CONTEXT_MF));
+	H264_CONTEXT_MF* sys = (H264_CONTEXT_MF*) calloc(1, sizeof(H264_CONTEXT_MF));
 
 	if (!sys)
 		goto error;
@@ -993,6 +1010,8 @@ static int openh264_compress(H264_CONTEXT* h264, BYTE** ppDstData,
 		{
 #if (OPENH264_MAJOR == 1) && (OPENH264_MINOR <= 5)
 			sys->EncParamExt.sSpatialLayers[0].sSliceCfg.uiSliceMode = SM_AUTO_SLICE;
+#else
+			sys->EncParamExt.sSpatialLayers[0].sSliceArgument.uiSliceMode = SM_FIXEDSLCNUM_SLICE;
 #endif
 		}
 
@@ -1594,12 +1613,8 @@ INT32 avc420_compress(H264_CONTEXT* h264, const BYTE* pSrcData, DWORD SrcFormat,
                       UINT32 nSrcStep, UINT32 nSrcWidth, UINT32 nSrcHeight,
                       BYTE** ppDstData, UINT32* pDstSize)
 {
-	int status = -1;
 	prim_size_t roi;
-	int nWidth, nHeight;
 	primitives_t* prims = primitives_get();
-	UINT32* iStride;
-	BYTE** pYUVData;
 
 	if (!h264)
 		return -1;
@@ -1607,39 +1622,16 @@ INT32 avc420_compress(H264_CONTEXT* h264, const BYTE* pSrcData, DWORD SrcFormat,
 	if (!h264->subsystem->Compress)
 		return -1;
 
-	iStride =  h264->iStride;
-	pYUVData = h264->pYUVData;
-	nWidth = (nSrcWidth + 1) & ~1;
-	nHeight = (nSrcHeight + 1) & ~1;
-
-	if (!(pYUVData[0] = (BYTE*) _aligned_malloc(nWidth * nHeight, 16)))
+	if (!avc420_ensure_buffer(h264, nSrcStep, nSrcWidth, nSrcHeight))
 		return -1;
 
-	iStride[0] = nWidth;
-
-	if (!(pYUVData[1] = (BYTE*) _aligned_malloc(nWidth * nHeight, 16)))
-		goto error_1;
-
-	iStride[1] = nWidth / 2;
-
-	if (!(pYUVData[2] = (BYTE*) _aligned_malloc(nWidth * nHeight, 16)))
-		goto error_2;
-
-	iStride[2] = nWidth / 2;
 	roi.width = nSrcWidth;
 	roi.height = nSrcHeight;
-	prims->RGBToYUV420_8u_P3AC4R(pSrcData, SrcFormat, nSrcStep, pYUVData, iStride,
-	                             &roi);
-	status = h264->subsystem->Compress(h264, ppDstData, pDstSize);
-	_aligned_free(pYUVData[2]);
-	pYUVData[2] = NULL;
-error_2:
-	_aligned_free(pYUVData[1]);
-	pYUVData[1] = NULL;
-error_1:
-	_aligned_free(pYUVData[0]);
-	pYUVData[0] = NULL;
-	return status;
+	if (prims->RGBToYUV420_8u_P3AC4R(pSrcData, SrcFormat, nSrcStep, h264->pYUVData, h264->iStride,
+								 &roi) != PRIMITIVES_SUCCESS)
+		return -1;
+
+	return h264->subsystem->Compress(h264, ppDstData, pDstSize);
 }
 
 INT32 avc444_compress(H264_CONTEXT* h264, const BYTE* pSrcData, DWORD SrcFormat,
@@ -1649,7 +1641,6 @@ INT32 avc444_compress(H264_CONTEXT* h264, const BYTE* pSrcData, DWORD SrcFormat,
 {
 	return -1;
 }
-
 
 static BOOL avc444_ensure_buffer(H264_CONTEXT* h264,
                                  DWORD nDstHeight)
@@ -1702,16 +1693,14 @@ static BOOL avc444_process_rects(H264_CONTEXT* h264, const BYTE* pSrcData,
                                  UINT32 SrcSize, BYTE* pDstData, UINT32 DstFormat, UINT32 nDstStep,
                                  UINT32 nDstWidth, UINT32 nDstHeight,
                                  const RECTANGLE_16* rects, UINT32 nrRects,
-                                 BOOL main)
+                                 avc444_frame_type type)
 {
 	const primitives_t* prims = primitives_get();
 	UINT32 x;
-	const BYTE* pYUVPoint[3] = { NULL, NULL, NULL };
-	BYTE* pYUVDstPoint[3];
 	UINT32* piDstStride = h264->iYUV444Stride;
 	BYTE** ppYUVDstData = h264->pYUV444Data;
 	const UINT32* piStride = h264->iStride;
-	BYTE** ppYUVData = h264->pYUVData;
+	const BYTE** ppYUVData = (const BYTE**)h264->pYUVData;
 
 	if (h264->subsystem->Decompress(h264, pSrcData, SrcSize) < 0)
 		return FALSE;
@@ -1722,42 +1711,17 @@ static BOOL avc444_process_rects(H264_CONTEXT* h264, const BYTE* pSrcData,
 	for (x = 0; x < nrRects; x++)
 	{
 		const RECTANGLE_16* rect = &rects[x];
-		prim_size_t roi;
+		const UINT32 alignedWidth = h264->width + ((h264->width % 16 != 0) ? 16 - h264->width % 16 : 0);
+		const UINT32 alignedHeight = h264->height + ((h264->height % 16 != 0) ? 16 - h264->height % 16 : 0);
 
 		if (!check_rect(h264, rect, nDstWidth, nDstHeight))
 			continue;
 
-		pYUVPoint[0] = ppYUVData[0] + rect->top * piStride[0] +
-		               rect->left;
-		pYUVPoint[1] = ppYUVData[1] + rect->top / 2 * piStride[1] +
-		               rect->left / 2;
-		pYUVPoint[2] = ppYUVData[2] + rect->top / 2 * piStride[2] +
-		               rect->left / 2;
-		pYUVDstPoint[0] = ppYUVDstData[0] + rect->top * piDstStride[0] +
-		                  rect->left;
-		pYUVDstPoint[1] = ppYUVDstData[1] + rect->top * piDstStride[1] +
-		                  rect->left;
-		pYUVDstPoint[2] = ppYUVDstData[2] + rect->top * piDstStride[2] +
-		                  rect->left;
-		roi.width = rect->right - rect->left + 1;
-		roi.height = rect->bottom - rect->top + 1;
-
-		if (main)
-		{
-			if (prims->YUV420CombineToYUV444(pYUVPoint, piStride,
-			                                 NULL, NULL,
-			                                 pYUVDstPoint, piDstStride,
-			                                 &roi) != PRIMITIVES_SUCCESS)
-				return FALSE;
-		}
-		else
-		{
-			if (prims->YUV420CombineToYUV444(NULL, NULL,
-			                                 pYUVPoint, piStride,
-			                                 pYUVDstPoint, piDstStride,
-			                                 &roi) != PRIMITIVES_SUCCESS)
-				return FALSE;
-		}
+		if (prims->YUV420CombineToYUV444(type, ppYUVData, piStride,
+		                                 alignedWidth, alignedHeight,
+		                                 ppYUVDstData, piDstStride,
+		                                 rect) != PRIMITIVES_SUCCESS)
+			return FALSE;
 	}
 
 	if (!avc_yuv_to_rgb(h264, rects, nrRects, nDstWidth,
@@ -1789,9 +1753,11 @@ INT32 avc444_decompress(H264_CONTEXT* h264, BYTE op,
                         RECTANGLE_16* auxRegionRects, UINT32 numAuxRegionRect,
                         const BYTE* pAuxSrcData, UINT32 AuxSrcSize,
                         BYTE* pDstData, DWORD DstFormat,
-                        UINT32 nDstStep, UINT32 nDstWidth, UINT32 nDstHeight)
+                        UINT32 nDstStep, UINT32 nDstWidth, UINT32 nDstHeight,
+                        UINT32 codecId)
 {
 	INT32 status = -1;
+	avc444_frame_type chroma = (codecId == RDPGFX_CODECID_AVC444) ? AVC444_CHROMAv1 : AVC444_CHROMAv2;
 
 	if (!h264 || !regionRects ||
 	    !pSrcData || !pDstData)
@@ -1803,11 +1769,11 @@ INT32 avc444_decompress(H264_CONTEXT* h264, BYTE op,
 		 * Chroma420 in stream 2 */
 			if (!avc444_process_rects(h264, pSrcData, SrcSize, pDstData, DstFormat, nDstStep, nDstWidth,
 			                          nDstHeight,
-			                          regionRects, numRegionRects, TRUE))
+			                          regionRects, numRegionRects, AVC444_LUMA))
 				status = -1;
 			else if (!avc444_process_rects(h264, pAuxSrcData, AuxSrcSize, pDstData, DstFormat, nDstStep,
 			                               nDstWidth, nDstHeight,
-			                               auxRegionRects, numAuxRegionRect, FALSE))
+			                               auxRegionRects, numAuxRegionRect, chroma))
 				status = -1;
 			else
 				status = 0;
@@ -1817,7 +1783,7 @@ INT32 avc444_decompress(H264_CONTEXT* h264, BYTE op,
 		case 2: /* Chroma420 in stream 1 */
 			if (!avc444_process_rects(h264, pSrcData, SrcSize, pDstData, DstFormat, nDstStep, nDstWidth,
 			                          nDstHeight,
-			                          regionRects, numRegionRects, FALSE))
+			                          regionRects, numRegionRects, chroma))
 				status = -1;
 			else
 				status = 0;
@@ -1827,7 +1793,7 @@ INT32 avc444_decompress(H264_CONTEXT* h264, BYTE op,
 		case 1: /* YUV420 in stream 1 */
 			if (!avc444_process_rects(h264, pSrcData, SrcSize, pDstData, DstFormat, nDstStep, nDstWidth,
 			                          nDstHeight,
-			                          regionRects, numRegionRects, TRUE))
+			                          regionRects, numRegionRects, AVC444_LUMA))
 				status = -1;
 			else
 				status = 0;

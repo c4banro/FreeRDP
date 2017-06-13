@@ -585,7 +585,7 @@ BOOL xf_create_window(xfContext* xfc)
 	}
 	else
 	{
-		xfc->drawable = DefaultRootWindow(xfc->display);
+		xfc->drawable = xf_CreateDummyWindow(xfc);
 	}
 
 	ZeroMemory(&gcv, sizeof(gcv));
@@ -1200,12 +1200,10 @@ static BOOL xf_post_connect(freerdp* instance)
 {
 	rdpUpdate* update;
 	rdpContext* context;
-	rdpChannels* channels;
 	rdpSettings* settings;
 	ResizeWindowEventArgs e;
 	xfContext* xfc = (xfContext*) instance->context;
 	context = instance->context;
-	channels = context->channels;
 	settings = instance->settings;
 	update = context->update;
 
@@ -1278,6 +1276,8 @@ static BOOL xf_post_connect(freerdp* instance)
 	pointer_cache_register_callbacks(update);
 	update->PlaySound = xf_play_sound;
 	update->SetKeyboardIndicators = xf_keyboard_set_indicators;
+	update->SetKeyboardImeStatus = xf_keyboard_set_ime_status;
+
 
 	if (!(xfc->clipboard = xf_clipboard_new(xfc)))
 		return FALSE;
@@ -1286,6 +1286,7 @@ static BOOL xf_post_connect(freerdp* instance)
 	e.width = settings->DesktopWidth;
 	e.height = settings->DesktopHeight;
 	PubSub_OnResizeWindow(context->pubSub, xfc, &e);
+
 	return TRUE;
 }
 
@@ -1314,12 +1315,17 @@ static void xf_post_disconnect(freerdp* instance)
 static int xf_logon_error_info(freerdp* instance, UINT32 data, UINT32 type)
 {
 	xfContext* xfc = (xfContext*) instance->context;
+	const char *str_data = freerdp_get_logon_error_info_data(data);
+	const char *str_type = freerdp_get_logon_error_info_type(type);
+	WLog_INFO(TAG, "Logon Error Info %s [%s]", str_data, str_type);
+
 	xf_rail_disable_remoteapp_mode(xfc);
 	return 1;
 }
 
 static void* xf_input_thread(void* arg)
 {
+	BOOL running = TRUE;
 	DWORD status;
 	DWORD nCount;
 	HANDLE events[3];
@@ -1336,48 +1342,61 @@ static void* xf_input_thread(void* arg)
 	events[nCount++] = xfc->x11event;
 	events[nCount++] = instance->context->abortEvent;
 
-	while (1)
+	while (running)
 	{
 		status = WaitForMultipleObjects(nCount, events, FALSE, INFINITE);
 
-		if (WaitForSingleObject(events[0], 0) == WAIT_OBJECT_0)
+		switch (status)
 		{
-			if (MessageQueue_Peek(queue, &msg, FALSE))
-			{
-				if (msg.id == WMQ_QUIT)
-					break;
-			}
-		}
-
-		if (WaitForSingleObject(events[1], 0) == WAIT_OBJECT_0)
-		{
-			do
-			{
-				xf_lock_x11(xfc, FALSE);
-				pending_status = XPending(xfc->display);
-				xf_unlock_x11(xfc, FALSE);
-
-				if (pending_status)
+			case WAIT_OBJECT_0:
+			case WAIT_OBJECT_0 + 1:
+			case WAIT_OBJECT_0 + 2:
+				if (WaitForSingleObject(events[0], 0) == WAIT_OBJECT_0)
 				{
-					xf_lock_x11(xfc, FALSE);
-					ZeroMemory(&xevent, sizeof(xevent));
-					XNextEvent(xfc->display, &xevent);
-					process_status = xf_event_process(instance, &xevent);
-					xf_unlock_x11(xfc, FALSE);
+					if (MessageQueue_Peek(queue, &msg, FALSE))
+					{
+						if (msg.id == WMQ_QUIT)
+							running = FALSE;
+					}
+				}
+
+				if (WaitForSingleObject(events[1], 0) == WAIT_OBJECT_0)
+				{
+					do
+					{
+						xf_lock_x11(xfc, FALSE);
+						pending_status = XPending(xfc->display);
+						xf_unlock_x11(xfc, FALSE);
+
+						if (pending_status)
+						{
+							xf_lock_x11(xfc, FALSE);
+							ZeroMemory(&xevent, sizeof(xevent));
+							XNextEvent(xfc->display, &xevent);
+							process_status = xf_event_process(instance, &xevent);
+							xf_unlock_x11(xfc, FALSE);
+
+							if (!process_status)
+								break;
+						}
+					}
+					while (pending_status);
 
 					if (!process_status)
+					{
+						running = FALSE;
 						break;
+					}
 				}
-			}
-			while (pending_status);
 
-			if (!process_status)
+				if (WaitForSingleObject(events[2], 0) == WAIT_OBJECT_0)
+					running = FALSE;
+
 				break;
-		}
 
-		if (WaitForSingleObject(events[2], 0) == WAIT_OBJECT_0)
-		{
-			break;
+			default:
+				running = FALSE;
+				break;
 		}
 	}
 
@@ -1447,7 +1466,6 @@ static void* xf_client_thread(void* param)
 	rdpContext* context;
 	HANDLE inputEvent = NULL;
 	HANDLE inputThread = NULL;
-	rdpChannels* channels;
 	rdpSettings* settings;
 	exit_code = 0;
 	instance = (freerdp*) param;
@@ -1482,13 +1500,12 @@ static void* xf_client_thread(void* param)
 		if (freerdp_get_last_error(instance->context) ==
 		    FREERDP_ERROR_AUTHENTICATION_FAILED)
 			exit_code = XF_EXIT_AUTH_FAILURE;
-		else
+		else if (exit_code == ERRINFO_SUCCESS)
 			exit_code = XF_EXIT_CONN_FAILED;
 
 		goto disconnect;
 	}
 
-	channels = context->channels;
 	settings = context->settings;
 
 	if (!settings->AsyncInput)
@@ -1536,6 +1553,9 @@ static void* xf_client_thread(void* param)
 		}
 
 		waitStatus = WaitForMultipleObjects(nCount, handles, FALSE, 100);
+
+		if (waitStatus == WAIT_FAILED)
+			break;
 
 		if (!settings->AsyncTransport)
 		{
@@ -1696,7 +1716,6 @@ static int xfreerdp_client_stop(rdpContext* context)
 
 static BOOL xfreerdp_client_new(freerdp* instance, rdpContext* context)
 {
-	rdpSettings* settings;
 	xfContext* xfc = (xfContext*) instance->context;
 	assert(context);
 	assert(xfc);
@@ -1711,7 +1730,6 @@ static BOOL xfreerdp_client_new(freerdp* instance, rdpContext* context)
 	instance->VerifyCertificate = client_cli_verify_certificate;
 	instance->VerifyChangedCertificate = client_cli_verify_changed_certificate;
 	instance->LogonErrorInfo = xf_logon_error_info;
-	settings = instance->settings;
 	PubSub_SubscribeTerminate(context->pubSub,
 	                          (pTerminateEventHandler) xf_TerminateEventHandler);
 #ifdef WITH_XRENDER

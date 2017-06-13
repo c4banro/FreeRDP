@@ -40,7 +40,7 @@
 
 #define CLAMP_COORDINATES(x, y) if (x < 0) x = 0; if (y < 0) y = 0
 
-const char* const X11_EVENT_STRINGS[] =
+static const char* const X11_EVENT_STRINGS[] =
 {
 	"", "",
 	"KeyPress",
@@ -311,7 +311,6 @@ BOOL xf_generic_ButtonPress(xfContext* xfc, int x, int y, int button,
 	BOOL extended;
 	rdpInput* input;
 	Window childWindow;
-	flags = 0;
 	wheel = FALSE;
 	extended = FALSE;
 	input = xfc->context.input;
@@ -407,14 +406,14 @@ static BOOL xf_event_ButtonPress(xfContext* xfc, XEvent* event, BOOL app)
 BOOL xf_generic_ButtonRelease(xfContext* xfc, int x, int y, int button,
                               Window window, BOOL app)
 {
-	int flags;
-	BOOL wheel;
-	BOOL extended;
+	int flags = 0;
+	BOOL extended = FALSE;
 	rdpInput* input;
 	Window childWindow;
-	flags = 0;
-	wheel = FALSE;
-	extended = FALSE;
+
+	if (!xfc || !xfc->context.input)
+		return FALSE;
+
 	input = xfc->context.input;
 
 	switch (button)
@@ -1062,10 +1061,7 @@ BOOL xf_event_process(freerdp* instance, XEvent* event)
 			break;
 	}
 
-	if (!xfc->remote_app)
-	{
-		xf_cliprdr_handle_xevent(xfc, event);
-	}
+	xf_cliprdr_handle_xevent(xfc, event);
 
 	xf_input_handle_event(xfc, event);
 	XSync(xfc->display, FALSE);

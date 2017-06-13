@@ -134,7 +134,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 if(NOT DEFINED BUILD_SHARED_LIBS)
-	if(IOS OR APPLE)
+	if(IOS)
 		set(BUILD_SHARED_LIBS OFF)
 	else()
 		set(BUILD_SHARED_LIBS ON)
@@ -182,6 +182,11 @@ if(MSVC)
 	if(NOT DEFINED CMAKE_SUPPRESS_REGENERATION)
 		set(CMAKE_SUPPRESS_REGENERATION ON)
 	endif()
+endif()
+
+# Enable 64bit file support on linux.
+if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
+	add_definitions("-D_FILE_OFFSET_BITS=64")
 endif()
 
 # Compiler-specific flags
@@ -816,6 +821,10 @@ set(CMAKE_SKIP_BUILD_RPATH FALSE)
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 set(CMAKE_INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/..")
+
+if (BUILD_SHARED_LIBS)
+	set(CMAKE_MACOSX_RPATH ON)
+endif()
 
 # Android profiling
 if(ANDROID)

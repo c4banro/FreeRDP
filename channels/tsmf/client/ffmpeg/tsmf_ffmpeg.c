@@ -132,7 +132,7 @@ static BOOL tsmf_ffmpeg_init_audio_stream(ITSMFDecoder* decoder, const TS_AM_MED
 #endif
 #else  /* LIBAVCODEC_VERSION_MAJOR < 55 */
 #ifdef AV_CPU_FLAG_SSE2
-	av_set_cpu_flags_mask(AV_CPU_FLAG_SSE2 | AV_CPU_FLAG_MMX2);
+	av_set_cpu_flags_mask(AV_CPU_FLAG_SSE2 | AV_CPU_FLAG_MMXEXT);
 #else
 	av_set_cpu_flags_mask(FF_MM_SSE2 | FF_MM_MMX2);
 #endif
@@ -428,18 +428,23 @@ static BOOL tsmf_ffmpeg_decode_audio(ITSMFDecoder* decoder, const BYTE *data, UI
 														decoded_frame->nb_samples, mdecoder->codec_context->sample_fmt, 1);
 				memcpy(dst, decoded_frame->data[0], frame_size);
 			}
+			else
+			{
+				frame_size = 0;
+			}
 			av_free(decoded_frame);
 		}
 #endif
-		if (len <= 0 || frame_size <= 0)
+		if (len > 0)
 		{
-			WLog_ERR(TAG, "error decoding");
-			break;
+			src += len;
+			src_size -= len;
 		}
-		src += len;
-		src_size -= len;
-		mdecoder->decoded_size += frame_size;
-		dst += frame_size;
+		if(frame_size > 0)
+		{
+			mdecoder->decoded_size += frame_size;
+			dst += frame_size;
+		}
 	}
 	if (mdecoder->decoded_size == 0)
 	{

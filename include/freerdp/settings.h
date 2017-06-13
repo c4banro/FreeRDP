@@ -238,10 +238,10 @@ struct _TARGET_NET_ADDRESS
 typedef struct _TARGET_NET_ADDRESS TARGET_NET_ADDRESS;
 
 /* Logon Error Info */
-
+#define LOGON_MSG_DISCONNECT_REFUSED		0xFFFFFFF9
 #define LOGON_MSG_NO_PERMISSION			0xFFFFFFFA
 #define LOGON_MSG_BUMP_OPTIONS			0xFFFFFFFB
-#define LOGON_MSG_SESSION_RECONNECT		0xFFFFFFFC
+#define LOGON_MSG_RECONNECT_OPTIONS		0xFFFFFFFC
 #define LOGON_MSG_SESSION_TERMINATE		0xFFFFFFFD
 #define LOGON_MSG_SESSION_CONTINUE		0xFFFFFFFE
 
@@ -778,6 +778,7 @@ typedef struct _RDPDR_PARALLEL RDPDR_PARALLEL;
 #define FreeRDP_GfxProgressiveV2				3843
 #define FreeRDP_GfxH264						3844
 #define FreeRDP_GfxAVC444					3845
+#define FreeRDP_GfxSendQoeAck					3846
 #define FreeRDP_BitmapCacheV3CodecId				3904
 #define FreeRDP_DrawNineGridEnabled				3968
 #define FreeRDP_DrawNineGridCacheSize				3969
@@ -1334,7 +1335,8 @@ struct rdp_settings
 	ALIGN64 BOOL GfxProgressiveV2; /* 3843 */
 	ALIGN64 BOOL GfxH264; /* 3844 */
 	ALIGN64 BOOL GfxAVC444; /* 3845 */
-	UINT64 padding3904[3904 - 3846]; /* 3846 */
+	ALIGN64 BOOL GfxSendQoeAck; /* 3846 */
+	UINT64 padding3904[3904 - 3847]; /* 3847 */
 
 	/**
 	 * Caches
