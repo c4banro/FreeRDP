@@ -2,7 +2,7 @@
 * FreeRDP: A Remote Desktop Protocol Implementation
 * Windows Desktop Sharing
 *
-* Copyright 2017 C4B COM For Business AG, Andreas Rossi <andreas.rossi@c4b.de>
+* Copyright 2018 C4B COM For Business AG, Andreas Rossi <andreas.rossi@c4b.de>
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.

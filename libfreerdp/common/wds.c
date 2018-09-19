@@ -2,7 +2,7 @@
 * FreeRDP: A Remote Desktop Protocol Implementation
 * Windows Desktop Sharing
 *
-* Copyright 2017 C4B COM For Business AG, Andreas Rossi <andreas.rossi@c4b.de>
+* Copyright 2018 C4B COM For Business AG, Andreas Rossi <andreas.rossi@c4b.de>
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -35,6 +35,10 @@
 #include <freerdp/client/cmdline.h>
 
 #include <freerdp/wds.h>
+
+
+#define TAG FREERDP_TAG("core")
+
 
 
 FREERDP_API int freerdp_wds_connectionstring_fill( rdpWdsConnectionstring* connectionString, const char* raSpecificParameters, const char* raSessionId, const char* sid, UINT32 machineCount, char** machines, UINT32* ports )
@@ -625,12 +629,19 @@ typedef struct
 	SOCKET clientSocket;
 	int nbListeners;
 	Listener* Listeners;
+    HANDLE* listenerDisconnectThread;
 } ReverseConnection;
+
+static void freerdp_wds_listener_disconnect( ReverseConnection* ctn );
+static void* freerdp_listener_disconnect_thread( void* arg );
 
 FREERDP_LOCAL rdpWdsReverseConnection* freerdp_wds_reverse_connect_new()
 {
 	ReverseConnection* newC = calloc( 1, sizeof( ReverseConnection ) );
 	newC->clientSocket = INVALID_SOCKET;
+    newC->Listeners = NULL;
+    newC->nbListeners = 0;
+    newC->listenerDisconnectThread = NULL;
 	return (rdpWdsReverseConnection*)newC;
 }
 
@@ -641,26 +652,21 @@ FREERDP_LOCAL void freerdp_wds_reverse_connect_free( rdpWdsReverseConnection* co
 
 	ReverseConnection* ctn = (ReverseConnection*)connection;
 
+    WLog_INFO( TAG, "freerdp_wds_reverse_connect_free started" );
+
 	if ( ctn->clientSocket != INVALID_SOCKET )
 		closesocket( ctn->clientSocket );
 
-	if ( ctn->Listeners )
-	{
-		for ( int i = 0; i < ctn->nbListeners; i++ )
-		{
-			if ( !ctn->Listeners[i].valid )
-				continue;
-			if ( WSA_INVALID_EVENT != ctn->Listeners[i].event )
-				WSACloseEvent( ctn->Listeners[i].event );
-			if ( INVALID_SOCKET != ctn->Listeners[i].socket )
-				closesocket( ctn->Listeners[i].socket );
-			if ( ctn->Listeners[i].address )
-				free( ctn->Listeners[i].address );
-		}
-		free( ctn->Listeners );
-	}
-		
+    if ( ctn->listenerDisconnectThread != NULL )
+    {
+        WaitForSingleObject( ctn->listenerDisconnectThread, INFINITE );
+        CloseHandle( ctn->listenerDisconnectThread );
+    }
+
+    freerdp_wds_listener_disconnect( ctn );
 	free( ctn );
+
+    WLog_INFO( TAG, "freerdp_wds_reverse_connect_free finished" );
 }
 
 
@@ -673,7 +679,9 @@ FREERDP_LOCAL int freerdp_wds_prepare_reverse_connect( rdpWdsReverseConnection* 
 	int status;
 	SOCKET sockfd;
 	char addr[64];
+    char tcpAddress[64];
 	int option_value;
+    LINGER linger;
 	struct addrinfo* ai;
 	struct addrinfo* res;
 	struct addrinfo hints = { 0 };
@@ -700,99 +708,157 @@ FREERDP_LOCAL int freerdp_wds_prepare_reverse_connect( rdpWdsReverseConnection* 
 		nbAdresses++;
 	}
 
-	if ( !nbAdresses )
-		return -1;
+    if ( !nbAdresses )
+    {
+        WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - don't find any tcp addresses" );
+        return -1;
+    }
+
+    WLog_INFO( TAG, "freerdp_wds_prepare_reverse_connect - found %i ip addresses", nbAdresses );
 
 	ctn->nbListeners = 0;
 	ctn->Listeners = calloc( nbAdresses, sizeof( Listener ) );
 
 	for ( ai = res; ai; ai = ai->ai_next )
 	{
+        if ( (ai->ai_family != AF_INET) && (ai->ai_family != AF_INET6) )
+            continue;
+
+        Listener* pListener = ctn->Listeners + ctn->nbListeners;
+
+        tcpAddress[0] = 0;
+        if ( ai->ai_family == AF_INET )
+            inet_ntop( ai->ai_addr->sa_family, &(((struct sockaddr_in *)ai->ai_addr)->sin_addr), tcpAddress, sizeof( tcpAddress ) );
+        else
+            inet_ntop( ai->ai_addr->sa_family, &(((struct sockaddr_in6 *)ai->ai_addr)->sin6_addr), tcpAddress, sizeof( tcpAddress ) );
+        WLog_INFO( TAG, "freerdp_wds_prepare_reverse_connect - try listen on %s", tcpAddress );
+
+        pListener->valid = FALSE;
+
 		sockfd = socket( ai->ai_family, ai->ai_socktype, ai->ai_protocol );
-		if ( sockfd == INVALID_SOCKET )
-			continue;
+        if ( sockfd == INVALID_SOCKET )
+        {
+            WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i can't create socket for %s", WSAGetLastError(), tcpAddress );
+            continue;
+        }
 
 		option_value = 1;
-		setsockopt( sockfd, SOL_SOCKET, SO_REUSEADDR, (void*)&option_value, sizeof( option_value ) );
+        if ( setsockopt( sockfd, SOL_SOCKET, SO_REUSEADDR, (void*)&option_value, sizeof( option_value ) ) )
+        {
+            WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i in setsockopt SO_REUSEADDR for %s", WSAGetLastError(), tcpAddress );
+            closesocket( (SOCKET)sockfd );
+            continue;
+        }
+
+        linger.l_onoff = 1;
+        linger.l_linger = 0;
+        if ( setsockopt( sockfd, SOL_SOCKET, SO_LINGER, (void*)&linger, sizeof( linger ) ) )
+        {
+            WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i in setsockopt SO_LINGER for %s", WSAGetLastError(), tcpAddress );
+            closesocket( (SOCKET)sockfd );
+            continue;
+        }
 
 #ifndef _WIN32
 		fcntl( sockfd, F_SETFL, O_NONBLOCK );
 #else
 		arg = 1;
-		ioctlsocket( sockfd, FIONBIO, &arg );
+        if ( ioctlsocket( sockfd, FIONBIO, &arg ) )
+        {
+            WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i in ioctlsocket for %s", WSAGetLastError(), tcpAddress );
+            closesocket( (SOCKET)sockfd );
+            continue;
+        }
 #endif
 
-		status = _bind( (SOCKET)sockfd, ai->ai_addr, ai->ai_addrlen );
-		if ( status != 0 )
+        socketEvent = WSACreateEvent();
+        if ( WSA_INVALID_EVENT == socketEvent )
+        {
+            WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i in WSACreateEvent for %s", WSAGetLastError(), tcpAddress );
+            free( pListener->address );
+            closesocket( (SOCKET)sockfd );
+            continue;
+        }
+        if ( WSAEventSelect( sockfd, socketEvent, FD_ACCEPT ) )
+        {
+            WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i in WSAEventSelect for %s", WSAGetLastError(), tcpAddress );
+            closesocket( (SOCKET)sockfd );
+            WSACloseEvent( socketEvent );
+            continue;
+        }
+
+        if ( _bind( (SOCKET)sockfd, ai->ai_addr, ai->ai_addrlen ) )
 		{
-			closesocket( (SOCKET)sockfd );
-			continue;
+            WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i in bind for %s", WSAGetLastError(), tcpAddress );
+            WSAEventSelect( (SOCKET)sockfd, NULL, 0 );
+            closesocket( (SOCKET)sockfd );
+            WSACloseEvent( socketEvent );
+            continue;
 		}
 
-		status = _listen( (SOCKET)sockfd, SOMAXCONN );
-		if ( status != 0 )
+        if ( _listen( (SOCKET)sockfd, SOMAXCONN ) )
 		{
-			closesocket( (SOCKET)sockfd );
-			continue;
+            WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i in listen for %s", WSAGetLastError(), tcpAddress );
+            WSAEventSelect( (SOCKET)sockfd, NULL, 0 );
+            closesocket( (SOCKET)sockfd );
+            WSACloseEvent( socketEvent );
+            continue;
 		}
 
-		socketEvent = WSACreateEvent();
-		if ( WSA_INVALID_EVENT == socketEvent )
-		{
-			closesocket( (SOCKET)sockfd );
-			continue;
-		}
-		WSAEventSelect( sockfd, socketEvent, FD_READ | FD_ACCEPT | FD_CLOSE );
+        addr[0] = 0;
+        if ( ai->ai_family == AF_INET )
+        {
+            struct sockaddr_in v4Address;
+            int size = sizeof( v4Address );
+            if ( getsockname( sockfd, (struct sockaddr*)&v4Address, &size ) )
+            {
+                WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i in gestsockname for %s", WSAGetLastError(), tcpAddress );
+                WSAEventSelect( (SOCKET)sockfd, NULL, 0 );
+                closesocket( (SOCKET)sockfd );
+                WSACloseEvent( socketEvent );
+                continue;
+            }
 
-		Listener* pListener = ctn->Listeners + ctn->nbListeners;
+            pListener->port = ntohs( v4Address.sin_port );
+            inet_ntop( ai->ai_family, &(v4Address.sin_addr), addr, sizeof( addr ) );
+        }
+        else
+        {
+            struct sockaddr_in6 v6Address;
+            int size = sizeof( v6Address );
+            if ( getsockname( sockfd, (struct sockaddr*)&v6Address, &size ) )
+            {
+                WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - error %i in gestsockname for %s", WSAGetLastError(), tcpAddress );
+                WSAEventSelect( (SOCKET)sockfd, NULL, 0 );
+                closesocket( (SOCKET)sockfd );
+                WSACloseEvent( socketEvent );
+                continue;
+            }
+
+            pListener->port = ntohs( v6Address.sin6_port );
+            inet_ntop( ai->ai_family, &(v6Address.sin6_addr), addr, sizeof( addr ) );
+        }
+        pListener->address = _strdup( addr );
+        if ( !pListener->address || !pListener->address[0] )
+        {
+            WLog_ERR( TAG, "freerdp_wds_prepare_reverse_connect - cant't address as string for %s", tcpAddress );
+            WSAEventSelect( (SOCKET)sockfd, NULL, 0 );
+            closesocket( (SOCKET)sockfd );
+            WSACloseEvent( socketEvent );
+            continue;
+        }
 
 		pListener->valid = TRUE;
 		pListener->socket = sockfd;
 		pListener->event = socketEvent;
-		if ( ai->ai_family == AF_INET )
-		{
-			struct sockaddr_in v4Address;
-			int size = sizeof( v4Address );
-			if ( getsockname( sockfd, (struct sockaddr*)&v4Address, &size ) )
-			{
-				pListener->valid = FALSE;
-				closesocket( (SOCKET)sockfd );
-				WSACloseEvent( socketEvent );
-				continue;
-			}
 
-			pListener->port = ntohs( v4Address.sin_port );
-			inet_ntop( ai->ai_family, &(v4Address.sin_addr), addr, sizeof( addr ) );
-		}
-		else
-		{
-			struct sockaddr_in6 v6Address;
-			int size = sizeof( v6Address );
-			if ( getsockname( sockfd, (struct sockaddr*)&v6Address, &size ) )
-			{
-				pListener->valid = FALSE;
-				closesocket( (SOCKET)sockfd );
-				WSACloseEvent( socketEvent );
-				continue;
-			}
-
-			pListener->port = ntohs( v6Address.sin6_port );
-			inet_ntop( ai->ai_family, &(v6Address.sin6_addr), addr, sizeof( addr ) );
-		}
-		pListener->address = _strdup( addr );
-		if ( !pListener->address )
-		{
-			pListener->valid = FALSE;
-			closesocket( (SOCKET)sockfd );
-			WSACloseEvent( socketEvent );
-			continue;
-		}
+        WLog_INFO( TAG, "freerdp_wds_prepare_reverse_connect - successfull listen on %s:%i for %s", pListener->address, pListener->port, tcpAddress );
 
 		ctn->nbListeners++;
 	}
 
 	freeaddrinfo( res );
-	return ctn->nbListeners;
+    return ctn->nbListeners;
 }
 
 
@@ -834,50 +900,114 @@ FREERDP_LOCAL int freerdp_wds_wait_for_connect( rdpWdsReverseConnection* connect
 	{
 		events[i] = ctn->Listeners[i].event;
 	}
-	if ( NULL != abortEvent )
-		events[nbEvents - 1] = abortEvent;
+    if ( NULL != abortEvent )
+    {
+        WLog_INFO( TAG, "freerdp_wds_wait_for_connect - called with %i listeners and abortEvent", ctn->nbListeners );
+        events[nbEvents - 1] = abortEvent;
+    }
+    else
+    {
+        WLog_INFO( TAG, "freerdp_wds_wait_for_connect - called with %i listeners and without abortEvent", ctn->nbListeners );
+    }
 
 	DWORD status = WaitForMultipleObjects( nbEvents, events, FALSE, INFINITE );
 
-	if ( status < WAIT_OBJECT_0 || status > WAIT_OBJECT_0 + nbEvents - 1 )
-		goto on_error; //any error
+    if ( status < WAIT_OBJECT_0 || status > WAIT_OBJECT_0 + nbEvents - 1 )
+    {
+        WLog_ERR( TAG, "freerdp_wds_wait_for_connect - error in WaitForMultipleObjects" );
+        goto on_error; //any error
+    }
 
-	if ( (abortEvent != NULL) && (status == WAIT_OBJECT_0 + nbEvents - 1) )
-		goto on_error; //abort signalled
+    if ( (abortEvent != NULL) && (status == WAIT_OBJECT_0 + nbEvents - 1) )
+    {
+        WLog_WARN( TAG, "freerdp_wds_wait_for_connect - abort signaled" );
+        goto on_error; //abort signalled
+    }
 
-	Listener* pSignaledListener = &(ctn->Listeners[status - WAIT_OBJECT_0]);
+    int idxSignaledListener = status - WAIT_OBJECT_0;
+
+    WLog_INFO( TAG, "freerdp_wds_wait_for_connect - listener %i signalled %s:%i", idxSignaledListener + 1, ctn->Listeners[idxSignaledListener].address, ctn->Listeners[idxSignaledListener].port );
+
+    Listener* pSignaledListener = &(ctn->Listeners[idxSignaledListener]);
 	SOCKET clientSocket = accept( pSignaledListener->socket, NULL, NULL );
-	if ( clientSocket == INVALID_SOCKET )
-		goto on_error;
+    if ( clientSocket == INVALID_SOCKET )
+    {
+        WLog_ERR( TAG, "freerdp_wds_wait_for_connect - clientsocket %i error %i in accept", idxSignaledListener + 1, WSAGetLastError() );
+        goto on_error;
+    }
+
+    WLog_INFO( TAG, "freerdp_wds_wait_for_connect - clientsocket %i accepted", idxSignaledListener + 1 );
 
 	/* set socket in blocking mode */
 	if ( WSAEventSelect( clientSocket, NULL, 0 ) )
 	{
 		closesocket( clientSocket );
-		int sockerr = WSAGetLastError();
+        WLog_ERR( TAG, "freerdp_wds_wait_for_connect - clientsocket %i error %i in WSAEventSelect", idxSignaledListener + 1, WSAGetLastError() );
 		goto on_error;
 	}
+
+    WLog_INFO( TAG, "freerdp_wds_wait_for_connect - clientsocket %i WSAEventSelect called", idxSignaledListener + 1 );
 
 #ifndef _WIN32
 	fcntl( sockfd, F_SETFL, O_NONBLOCK );
 #else
 	arg = 0;
-	ioctlsocket( clientSocket, FIONBIO, &arg );
+	if ( ioctlsocket( clientSocket, FIONBIO, &arg ) )
+        WLog_ERR( TAG, "freerdp_wds_wait_for_connect - clientsocket %i error %i set blocking mode on", idxSignaledListener + 1, WSAGetLastError() );
+    else
+        WLog_INFO( TAG, "freerdp_wds_wait_for_connect - clientsocket %i set blocking mode on", idxSignaledListener + 1 );
 #endif
+
 
 	ctn->clientSocket = clientSocket;
 	free( events );
 
-	for ( int i = 0; i < ctn->nbListeners; i++ )
-	{
-		closesocket( ctn->Listeners[i].socket );
-		WSACloseEvent( ctn->Listeners[i].event );
-		ctn->Listeners[i].valid = FALSE;
-	}
-	free( ctn->Listeners );
-	ctn->Listeners = NULL;
-	ctn->nbListeners = 0;
+    if ( !(ctn->listenerDisconnectThread = CreateThread( NULL, 0, (LPTHREAD_START_ROUTINE)freerdp_listener_disconnect_thread,
+        ctn, 0, NULL )) )
+    {
+        WLog_ERR( TAG, "Failed to create listener disconnect thread" );
+        freerdp_wds_listener_disconnect( ctn );
+    }
 
+    if ( abortEvent != NULL )
+    {
+        if ( WAIT_OBJECT_0 == WaitForSingleObject( abortEvent, 0 ) )
+        {
+            WLog_WARN( TAG, "freerdp_wds_wait_for_connect - clientsocket %i abort signaled in end of function", idxSignaledListener + 1 );
+            return -1;
+        }
+    }
+
+    union
+    {
+        struct sockaddr address;
+        struct sockaddr_in v4Address;
+        struct sockaddr_in6 v6Address;
+    } localAddress, remoteAddress;
+
+    int localAddressSize = sizeof( localAddress );
+    int remoteAddressSize = sizeof( remoteAddress );
+
+    BOOL localFound = 0 == getsockname( clientSocket, (struct sockaddr*)&localAddress, &localAddressSize );
+    BOOL remoteFound = 0 == getpeername( clientSocket, (struct sockaddr*)&remoteAddress, &remoteAddressSize );
+
+    char strLocal[99] = "";
+    int  portLocal = 0;
+    if ( localFound )
+    {
+        portLocal = ntohs( localAddress.address.sa_family == AF_INET ? localAddress.v4Address.sin_port : localAddress.v6Address.sin6_port );
+        inet_ntop( localAddress.address.sa_family, localAddress.address.sa_family == AF_INET ? (PVOID*)&localAddress.v4Address.sin_addr : (PVOID*)&localAddress.v6Address.sin6_addr, strLocal, sizeof( strLocal ) );
+    }
+
+    char strRemote[99] = "";
+    int  portRemote = 0;
+    if ( remoteFound )
+    {
+        portRemote = ntohs( remoteAddress.address.sa_family == AF_INET ? remoteAddress.v4Address.sin_port : remoteAddress.v6Address.sin6_port );
+        inet_ntop( remoteAddress.address.sa_family, remoteAddress.address.sa_family == AF_INET ? (PVOID*)&remoteAddress.v4Address.sin_addr : (PVOID*)&remoteAddress.v6Address.sin6_addr, strRemote, sizeof( strRemote ) );
+    }
+
+    WLog_INFO( TAG, "freerdp_wds_wait_for_connect - clientsocket %i ready local %s:%i remote %s:%i", idxSignaledListener + 1, strLocal, portLocal, strRemote, portRemote );
 	return 0;
 
 on_error:
@@ -899,10 +1029,58 @@ FREERDP_LOCAL int freerdp_wds_update_settings_after_reverse_connect( rdpWdsRever
 		return -1;
 	freerdp_set_param_uint32( settings, FreeRDP_ServerPort, ctn->clientSocket );
 
-	freerdp_set_param_bool( settings, FreeRDP_RdpSecurity, TRUE );
+    freerdp_set_param_bool( settings, FreeRDP_RdpSecurity, TRUE );
 	freerdp_set_param_bool( settings, FreeRDP_TlsSecurity, FALSE );
 	freerdp_set_param_bool( settings, FreeRDP_NlaSecurity, FALSE );
 	freerdp_set_param_bool( settings, FreeRDP_ExtSecurity, FALSE );
-	//freerdp_set_param_bool( settings, FreeRDP_NegotiateSecurityLayer, FALSE );
-	return 0;
+	freerdp_set_param_bool( settings, FreeRDP_NegotiateSecurityLayer, TRUE );
+    freerdp_set_param_bool( settings, FreeRDP_SendPreconnectionPdu, FALSE );
+    return 0;
+}
+
+
+static void freerdp_wds_listener_disconnect( ReverseConnection* ctn )
+{
+    if ( !ctn || !ctn->nbListeners )
+        return;
+
+    WLog_INFO( TAG, "freerdp_wds_listener_disconnect - start closing all listener" );
+    for ( int i = 0; i < ctn->nbListeners; i++ )
+    {
+        if ( ctn->Listeners[i].valid )
+        {
+            WLog_INFO( TAG, "freerdp_wds_listener_disconnect - listener %i start closing %s:%i", i + 1, ctn->Listeners[i].address, ctn->Listeners[i].port );
+
+            if ( WSAEventSelect( ctn->Listeners[i].socket, NULL, 0 ) )
+                WLog_ERR( TAG, "freerdp_wds_listener_disconnect - listener %i error %i in WSAEventSelect %s:%i", i + 1, WSAGetLastError(), ctn->Listeners[i].address, ctn->Listeners[i].port );
+            else
+                WLog_INFO( TAG, "freerdp_wds_listener_disconnect - listener %i WSAEventSelect done %s:%i", i + 1, ctn->Listeners[i].address, ctn->Listeners[i].port );
+            if ( closesocket( ctn->Listeners[i].socket ) )
+                WLog_ERR( TAG, "freerdp_wds_listener_disconnect - listener %i error %i in closesocket %s:%i", i + 1, WSAGetLastError(), ctn->Listeners[i].address, ctn->Listeners[i].port );
+            else
+                WLog_INFO( TAG, "freerdp_wds_listener_disconnect - listener %i closesocket done %s:%i", i + 1, ctn->Listeners[i].address, ctn->Listeners[i].port );
+            if ( !WSACloseEvent( ctn->Listeners[i].event ) )
+                WLog_ERR( TAG, "freerdp_wds_listener_disconnect - listener %i error %i in WSACloseEvent %s:%i", i + 1, WSAGetLastError(), ctn->Listeners[i].address, ctn->Listeners[i].port );
+            else
+                WLog_INFO( TAG, "freerdp_wds_listener_disconnect - listener %i WSACloseEvent done %s:%i", i + 1, ctn->Listeners[i].address, ctn->Listeners[i].port );
+
+            WLog_INFO( TAG, "freerdp_wds_listener_disconnect - listener %i closed %s:%i", i + 1, ctn->Listeners[i].address, ctn->Listeners[i].port );
+            ctn->Listeners[i].valid = FALSE;
+        }
+    }
+    WLog_INFO( TAG, "freerdp_wds_listener_disconnect - all listener closed" );
+
+    free( ctn->Listeners );
+    ctn->Listeners = NULL;
+    ctn->nbListeners = 0;
+}
+
+static void* freerdp_listener_disconnect_thread( void* arg )
+{
+    ReverseConnection* ctn = (ReverseConnection*)arg;
+    WLog_INFO( TAG, "freerdp_listener_disconnect_thread - started" );
+    freerdp_wds_listener_disconnect( ctn );
+    WLog_INFO( TAG, "freerdp_listener_disconnect_thread - finished" );
+    ExitThread( 0 );
+    return NULL;
 }

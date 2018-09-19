@@ -614,9 +614,12 @@ BOOL update_post_connect(rdpUpdate* update)
 {
 	update->asynchronous = update->context->settings->AsyncUpdate;
 
-	if (update->asynchronous)
-		if (!(update->proxy = update_message_proxy_new(update)))
-			return FALSE;
+    if ( update->asynchronous )
+    {
+        if ( !(update->proxy = update_message_proxy_new( update )) )
+            return FALSE;
+        WLog_INFO( TAG, "update_post_connect - update thread startet" );
+    }
 
 	update->altsec->switch_surface.bitmapId = SCREEN_BITMAP_SURFACE;
 	IFCALL(update->altsec->SwitchSurface, update->context,
@@ -629,8 +632,12 @@ void update_post_disconnect(rdpUpdate* update)
 {
 	update->asynchronous = update->context->settings->AsyncUpdate;
 
-	if (update->asynchronous)
-		update_message_proxy_free(update->proxy);
+    if ( update->asynchronous )
+    {
+        WLog_INFO( TAG, "update_post_disconnect - try stop update thread" );
+        update_message_proxy_free( update->proxy );
+        WLog_INFO( TAG, "update_post_disconnect - update thread stopped" );
+    }
 
 	update->initialState = TRUE;
 }

@@ -145,7 +145,7 @@ FREERDP_API BOOL freerdp_prepare_reverse_connect( freerdp* instance )
 	if ( !instance->context->wdsReverseConnection )
 		return FALSE;
 
-	return 0 != freerdp_wds_prepare_reverse_connect( instance->context->wdsReverseConnection );
+	return 0 < freerdp_wds_prepare_reverse_connect( instance->context->wdsReverseConnection );
 }
 
 
@@ -191,19 +191,26 @@ BOOL freerdp_connect(freerdp* instance)
 	/* handle reverse connect */
 	if ( instance->context->wdsReverseConnection )
 	{
+        WLog_INFO( TAG, "calling freerdp_wds_wait_for_connect" );
 		if ( 0 > freerdp_wds_wait_for_connect( instance->context->wdsReverseConnection, instance->context->abortEvent ) )
 		{
 			//abort called
+            WLog_WARN( TAG, "freerdp_wds_wait_for_connect aborted" );
 			freerdp_set_last_error( instance->context, FREERDP_ERROR_CONNECT_CANCELLED );
 			return FALSE;
 		}
-		if ( 0 > freerdp_wds_update_settings_after_reverse_connect( instance->context->wdsReverseConnection, instance->settings ) )
-			return FALSE;
+        WLog_INFO( TAG, "freerdp_wds_wait_for_connect succeeded" );
+        if ( 0 > freerdp_wds_update_settings_after_reverse_connect( instance->context->wdsReverseConnection, instance->settings ) )
+        {
+            WLog_INFO( TAG, "freerdp_wds_update_settings_after_reverse_connect failed" );
+            return FALSE;
+        }
 	}
 
 	rdp = instance->context->rdp;
 	settings = instance->settings;
 	instance->context->codecs = codecs_new(instance->context);
+    WLog_INFO( TAG, "calling instance->PreConnect" );
 	IFCALLRET(instance->PreConnect, status, instance);
 
 	if (status)

@@ -347,7 +347,7 @@ BOOL transport_connect_nla(rdpTransport* transport)
 }
 
 BOOL transport_connect(rdpTransport* transport, const char* hostname,
-                       UINT16 port, int timeout)
+                       int port, int timeout)
 {
 	int sockfd;
 	BOOL status = FALSE;
