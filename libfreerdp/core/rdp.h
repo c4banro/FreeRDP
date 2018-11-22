@@ -175,6 +175,9 @@ struct rdp_rdp
 	BOOL resendFocus;
 	BOOL deactivation_reactivation;
 	BOOL AwaitCapabilities;
+
+	/**	reduce_cpu > 0: delay for reduce CPU in milliseconds */
+	UINT32 reduce_cpu;
 };
 
 FREERDP_LOCAL BOOL rdp_read_security_header(wStream* s, UINT16* flags);

@@ -1046,3 +1046,23 @@ void setChannelError(rdpContext* context, UINT errorNum, char* description)
 	strncpy(context->errorDescription, description, 499);
 	SetEvent(context->channelErrorEvent);
 }
+
+/** dwMilliseconds > 0: delay for reduce CPU in milliseconds */
+FREERDP_API BOOL freerdp_set_reduce_cpu(freerdp* instance, UINT32 dwMilliseconds)
+{
+	if (!instance)
+		return FALSE;
+
+	if (!instance->context)
+		return FALSE;
+
+	if (!instance->context->rdp)
+		return FALSE;
+
+	rdpRdp* rdp;
+	rdp = instance->context->rdp;
+	rdp->reduce_cpu = dwMilliseconds;
+
+	return TRUE;
+}
+

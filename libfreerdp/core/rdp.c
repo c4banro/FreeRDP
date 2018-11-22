@@ -1273,6 +1273,11 @@ static int rdp_recv_fastpath_pdu(rdpRdp* rdp, wStream* s)
 
 static int rdp_recv_pdu(rdpRdp* rdp, wStream* s)
 {
+	/** reduce_cpu > 0: delay for reduce CPU in milliseconds */
+	UINT32 rCpu = rdp->reduce_cpu;
+	if (rCpu > 0)
+		Sleep(rCpu);
+
 	if (tpkt_verify_header(s))
 		return rdp_recv_tpkt_pdu(rdp, s);
 	else
@@ -1586,6 +1591,8 @@ rdpRdp* rdp_new(rdpContext* context)
 	if (!rdp->bulk)
 		goto out_free_multitransport;
 
+	rdp->reduce_cpu = 0;
+
 	return rdp;
 
 out_free_multitransport:
@@ -1684,6 +1691,7 @@ void rdp_reset(rdpRdp* rdp)
 	rdp->errorInfo = 0;
 	rdp->deactivation_reactivation = 0;
 	rdp->finalize_sc_pdus = 0;
+	rdp->reduce_cpu = 0;
 }
 
 /**
