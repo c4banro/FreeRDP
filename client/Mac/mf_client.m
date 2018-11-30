@@ -49,7 +49,7 @@ static int mfreerdp_client_start(rdpContext* context)
 	{
 		// view not specified beforehand. Create view dynamically
 		mfc->view = [[MRDPView alloc] initWithFrame : NSMakeRect(0, 0,
-		             context->settings->DesktopWidth, context->settings->DesktopHeight)];
+		                              context->settings->DesktopWidth, context->settings->DesktopHeight)];
 		mfc->view_ownership = TRUE;
 	}
 
@@ -90,7 +90,6 @@ static BOOL mfreerdp_client_new(freerdp* instance, rdpContext* context)
 	context->instance->PostConnect = mac_post_connect;
 	context->instance->Authenticate = mac_authenticate;
 	settings = instance->settings;
-	settings->AsyncTransport = TRUE;
 	settings->AsyncUpdate = TRUE;
 	settings->AsyncInput = TRUE;
 	return TRUE;
@@ -128,7 +127,7 @@ static void freerdp_client_mouse_event(rdpContext* cfc, DWORD flags, int x,
 	if (y >= height)
 		y = height - 1;
 
-	input->MouseEvent(input, flags, x, y);
+	freerdp_input_send_mouse_event(input, flags, x, y);
 }
 
 void mf_scale_mouse_event(void* context, rdpInput* input, UINT16 flags,
@@ -153,12 +152,12 @@ void mf_scale_mouse_event(void* context, rdpInput* input, UINT16 flags,
 			y -= (dh - wh);
 		}
 
-		input->MouseEvent(input, flags, x + mfc->xCurrentScroll, y);
+		freerdp_input_send_mouse_event(input, flags, x + mfc->xCurrentScroll, y);
 	}
 	else
 	{
 		y = y * dh / wh + mfc->yCurrentScroll;
-		input->MouseEvent(input, flags, x * dw / ww + mfc->xCurrentScroll, y);
+		freerdp_input_send_mouse_event(input, flags, x * dw / ww + mfc->xCurrentScroll, y);
 	}
 }
 

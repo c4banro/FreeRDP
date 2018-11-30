@@ -180,11 +180,26 @@ struct rdp_context
 	ALIGN64 rdpCodecs* codecs; /* 42 */
 	ALIGN64 rdpAutoDetect* autodetect; /* 43 */
 	ALIGN64 HANDLE abortEvent; /* 44 */
-	ALIGN64 rdpWdsReverseConnection* wdsReverseConnection; /* 45 */
-	UINT64 paddingC[64 - 46]; /* 46 */
+	ALIGN64 int  disconnectUltimatum; /* 45 */
+	ALIGN64 rdpWdsReverseConnection* wdsReverseConnection; /* 46 */
+	UINT64 paddingC[64 - 47]; /* 47 */
 
 	UINT64 paddingD[96 - 64]; /* 64 */
 	UINT64 paddingE[128 - 96]; /* 96 */
+};
+
+/**
+ *  Defines the possible disconnect reasons in the MCS Disconnect Provider
+ *  Ultimatum PDU
+ */
+
+enum Disconnect_Ultimatum
+{
+	Disconnect_Ultimatum_domain_disconnected = 0,
+	Disconnect_Ultimatum_provider_initiated = 1,
+	Disconnect_Ultimatum_token_purged = 2,
+	Disconnect_Ultimatum_user_requested = 3,
+	Disconnect_Ultimatum_channel_purged = 4
 };
 
 #include <freerdp/client.h>
@@ -242,7 +257,9 @@ struct rdp_freerdp
 								   Callback for context deallocation
 								   Can be set before calling freerdp_context_free() to have it executed before deallocation.
 								   Must be set to NULL if not needed. */
-	UINT64 paddingC[48 - 35]; /* 35 */
+	UINT64 paddingC[47 - 35]; /* 35 */
+
+	ALIGN64 UINT ConnectionCallbackState; /* 47 */
 
 	ALIGN64 pPreConnect PreConnect; /**< (offset 48)
 								 Callback for pre-connect operations.
@@ -310,6 +327,8 @@ FREERDP_API BOOL freerdp_connect(freerdp* instance);
 FREERDP_API BOOL freerdp_abort_connect(freerdp* instance);
 FREERDP_API BOOL freerdp_shall_disconnect(freerdp* instance);
 FREERDP_API BOOL freerdp_disconnect(freerdp* instance);
+
+FREERDP_API BOOL freerdp_disconnect_before_reconnect(freerdp* instance);
 FREERDP_API BOOL freerdp_reconnect(freerdp* instance);
 
 FREERDP_API UINT freerdp_channel_add_init_handle_data(rdpChannelHandles* handles, void* pInitHandle,
@@ -361,6 +380,8 @@ FREERDP_API void freerdp_free(freerdp* instance);
 FREERDP_API BOOL freerdp_focus_required(freerdp* instance);
 FREERDP_API void freerdp_set_focus(freerdp* instance);
 
+FREERDP_API int freerdp_get_disconnect_ultimatum(rdpContext* context);
+
 FREERDP_API UINT32 freerdp_get_last_error(rdpContext* context);
 FREERDP_API const char* freerdp_get_last_error_name(UINT32 error);
 FREERDP_API const char* freerdp_get_last_error_string(UINT32 error);
@@ -379,6 +400,9 @@ FREERDP_API const char* getChannelErrorDescription(rdpContext* context);
 FREERDP_API void setChannelError(rdpContext* context, UINT errorNum,
                                  char* description);
 FREERDP_API BOOL checkChannelErrorEvent(rdpContext* context);
+
+/** dwMilliseconds > 0: delay for reduce CPU in milliseconds */
+FREERDP_API BOOL freerdp_set_reduce_cpu(freerdp* instance, UINT32 dwMilliseconds);
 
 #ifdef __cplusplus
 }

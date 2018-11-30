@@ -34,6 +34,7 @@
 #include "cliprdr_main.h"
 #include "cliprdr_format.h"
 
+#ifdef WITH_DEBUG_CLIPRDR
 static const char* const CB_MSG_TYPE_STRINGS[] =
 {
 	"",
@@ -49,6 +50,7 @@ static const char* const CB_MSG_TYPE_STRINGS[] =
 	"CB_LOCK_CLIPDATA",
 	"CB_UNLOCK_CLIPDATA"
 };
+#endif
 
 CliprdrClientContext* cliprdr_get_client_interface(cliprdrPlugin* cliprdr)
 {
@@ -87,7 +89,7 @@ static wStream* cliprdr_packet_new(UINT16 msgType, UINT16 msgFlags,
  */
 static UINT cliprdr_packet_send(cliprdrPlugin* cliprdr, wStream* s)
 {
-	UINT32 pos;
+	size_t pos;
 	UINT32 dataLen;
 	UINT status = CHANNEL_RC_OK;
 	pos = Stream_GetPosition(s);
@@ -160,6 +162,9 @@ static UINT cliprdr_process_general_capability(cliprdrPlugin* cliprdr,
 		return ERROR_INTERNAL_ERROR;
 	}
 
+	if (Stream_GetRemainingLength(s) < 8)
+		return ERROR_INVALID_DATA;
+
 	Stream_Read_UINT32(s, version); /* version (4 bytes) */
 	Stream_Read_UINT32(s, generalFlags); /* generalFlags (4 bytes) */
 	DEBUG_CLIPRDR("Version: %"PRIu32"", version);
@@ -218,14 +223,24 @@ static UINT cliprdr_process_clip_caps(cliprdrPlugin* cliprdr, wStream* s,
 	UINT16 cCapabilitiesSets;
 	UINT16 capabilitySetType;
 	UINT error = CHANNEL_RC_OK;
+
+	if (Stream_GetRemainingLength(s) < 4)
+		return ERROR_INVALID_DATA;
+
 	Stream_Read_UINT16(s, cCapabilitiesSets); /* cCapabilitiesSets (2 bytes) */
 	Stream_Seek_UINT16(s); /* pad1 (2 bytes) */
 	WLog_Print(cliprdr->log, WLOG_DEBUG, "ServerCapabilities");
 
 	for (index = 0; index < cCapabilitiesSets; index++)
 	{
+		if (Stream_GetRemainingLength(s) < 4)
+			return ERROR_INVALID_DATA;
+
 		Stream_Read_UINT16(s, capabilitySetType); /* capabilitySetType (2 bytes) */
 		Stream_Read_UINT16(s, lengthCapability); /* lengthCapability (2 bytes) */
+
+		if (lengthCapability < 4 || Stream_GetRemainingLength(s) < lengthCapability - 4)
+			return ERROR_INVALID_DATA;
 
 		switch (capabilitySetType)
 		{
@@ -322,7 +337,6 @@ static UINT cliprdr_process_filecontents_request(cliprdrPlugin* cliprdr,
 	request.msgFlags = flags;
 	request.dataLen = length;
 	request.haveClipDataId = FALSE;
-
 	Stream_Read_UINT32(s, request.streamId); /* streamId (4 bytes) */
 	Stream_Read_UINT32(s, request.listIndex); /* listIndex (4 bytes) */
 	Stream_Read_UINT32(s, request.dwFlags); /* dwFlags (4 bytes) */
@@ -448,8 +462,7 @@ static UINT cliprdr_process_unlock_clipdata(cliprdrPlugin* cliprdr, wStream* s,
 	unlockClipboardData.msgType = CB_UNLOCK_CLIPDATA;
 	unlockClipboardData.msgFlags = flags;
 	unlockClipboardData.dataLen = length;
-	Stream_Read_UINT32(s,
-	                   unlockClipboardData.clipDataId); /* clipDataId (4 bytes) */
+	Stream_Read_UINT32(s, unlockClipboardData.clipDataId); /* clipDataId (4 bytes) */
 	IFCALLRET(context->ServerUnlockClipboardData, error, context,
 	          &unlockClipboardData);
 
@@ -470,9 +483,17 @@ static UINT cliprdr_order_recv(cliprdrPlugin* cliprdr, wStream* s)
 	UINT16 msgFlags;
 	UINT32 dataLen;
 	UINT error;
+
+	if (Stream_GetRemainingLength(s) < 8)
+		return ERROR_INVALID_DATA;
+
 	Stream_Read_UINT16(s, msgType); /* msgType (2 bytes) */
 	Stream_Read_UINT16(s, msgFlags); /* msgFlags (2 bytes) */
 	Stream_Read_UINT32(s, dataLen); /* dataLen (4 bytes) */
+
+	if (Stream_GetRemainingLength(s) < dataLen)
+		return ERROR_INVALID_DATA;
+
 #ifdef WITH_DEBUG_CLIPRDR
 	WLog_DBG(TAG, "msgType: %s (%"PRIu16"), msgFlags: %"PRIu16" dataLen: %"PRIu32"",
 	         CB_MSG_TYPE_STRINGS[msgType], msgType, msgFlags, dataLen);
@@ -500,40 +521,35 @@ static UINT cliprdr_order_recv(cliprdrPlugin* cliprdr, wStream* s)
 			break;
 
 		case CB_FORMAT_LIST_RESPONSE:
-			if ((error = cliprdr_process_format_list_response(cliprdr, s, dataLen,
-			             msgFlags)))
+			if ((error = cliprdr_process_format_list_response(cliprdr, s, dataLen, msgFlags)))
 				WLog_ERR(TAG, "cliprdr_process_format_list_response failed with error %"PRIu32"!",
 				         error);
 
 			break;
 
 		case CB_FORMAT_DATA_REQUEST:
-			if ((error = cliprdr_process_format_data_request(cliprdr, s, dataLen,
-			             msgFlags)))
+			if ((error = cliprdr_process_format_data_request(cliprdr, s, dataLen, msgFlags)))
 				WLog_ERR(TAG, "cliprdr_process_format_data_request failed with error %"PRIu32"!",
 				         error);
 
 			break;
 
 		case CB_FORMAT_DATA_RESPONSE:
-			if ((error = cliprdr_process_format_data_response(cliprdr, s, dataLen,
-			             msgFlags)))
+			if ((error = cliprdr_process_format_data_response(cliprdr, s, dataLen, msgFlags)))
 				WLog_ERR(TAG, "cliprdr_process_format_data_response failed with error %"PRIu32"!",
 				         error);
 
 			break;
 
 		case CB_FILECONTENTS_REQUEST:
-			if ((error = cliprdr_process_filecontents_request(cliprdr, s, dataLen,
-			             msgFlags)))
+			if ((error = cliprdr_process_filecontents_request(cliprdr, s, dataLen, msgFlags)))
 				WLog_ERR(TAG, "cliprdr_process_filecontents_request failed with error %"PRIu32"!",
 				         error);
 
 			break;
 
 		case CB_FILECONTENTS_RESPONSE:
-			if ((error = cliprdr_process_filecontents_response(cliprdr, s, dataLen,
-			             msgFlags)))
+			if ((error = cliprdr_process_filecontents_response(cliprdr, s, dataLen, msgFlags)))
 				WLog_ERR(TAG, "cliprdr_process_filecontents_response failed with error %"PRIu32"!",
 				         error);
 
@@ -586,12 +602,9 @@ static UINT cliprdr_client_capabilities(CliprdrClientContext* context,
 
 	Stream_Write_UINT16(s, 1); /* cCapabilitiesSets */
 	Stream_Write_UINT16(s, 0); /* pad1 */
-	generalCapabilitySet = (CLIPRDR_GENERAL_CAPABILITY_SET*)
-	                       capabilities->capabilitySets;
-	Stream_Write_UINT16(s,
-	                    generalCapabilitySet->capabilitySetType); /* capabilitySetType */
-	Stream_Write_UINT16(s,
-	                    generalCapabilitySet->capabilitySetLength); /* lengthCapability */
+	generalCapabilitySet = (CLIPRDR_GENERAL_CAPABILITY_SET*)capabilities->capabilitySets;
+	Stream_Write_UINT16(s, generalCapabilitySet->capabilitySetType); /* capabilitySetType */
+	Stream_Write_UINT16(s, generalCapabilitySet->capabilitySetLength); /* lengthCapability */
 	Stream_Write_UINT32(s, generalCapabilitySet->version); /* version */
 	Stream_Write_UINT32(s, generalCapabilitySet->generalFlags); /* generalFlags */
 	WLog_Print(cliprdr->log, WLOG_DEBUG, "ClientCapabilities");
@@ -618,8 +631,7 @@ static UINT cliprdr_temp_directory(CliprdrClientContext* context,
 		return ERROR_INTERNAL_ERROR;
 	}
 
-	length = ConvertToUnicode(CP_UTF8, 0, tempDirectory->szTempDir, -1, &wszTempDir,
-	                          0);
+	length = ConvertToUnicode(CP_UTF8, 0, tempDirectory->szTempDir, -1, &wszTempDir, 0);
 
 	if (length < 0)
 		return ERROR_INTERNAL_ERROR;
@@ -796,8 +808,7 @@ static UINT cliprdr_client_lock_clipboard_data(CliprdrClientContext* context,
 		return ERROR_INTERNAL_ERROR;
 	}
 
-	Stream_Write_UINT32(s,
-	                    lockClipboardData->clipDataId); /* clipDataId (4 bytes) */
+	Stream_Write_UINT32(s, lockClipboardData->clipDataId); /* clipDataId (4 bytes) */
 	WLog_Print(cliprdr->log, WLOG_DEBUG,
 	           "ClientLockClipboardData: clipDataId: 0x%08"PRIX32"",
 	           lockClipboardData->clipDataId);
@@ -822,8 +833,7 @@ static UINT cliprdr_client_unlock_clipboard_data(CliprdrClientContext* context,
 		return ERROR_INTERNAL_ERROR;
 	}
 
-	Stream_Write_UINT32(s,
-	                    unlockClipboardData->clipDataId); /* clipDataId (4 bytes) */
+	Stream_Write_UINT32(s, unlockClipboardData->clipDataId); /* clipDataId (4 bytes) */
 	WLog_Print(cliprdr->log, WLOG_DEBUG,
 	           "ClientUnlockClipboardData: clipDataId: 0x%08"PRIX32"",
 	           unlockClipboardData->clipDataId);
@@ -852,8 +862,7 @@ static UINT cliprdr_client_format_data_request(CliprdrClientContext* context,
 		return ERROR_INTERNAL_ERROR;
 	}
 
-	Stream_Write_UINT32(s,
-	                    formatDataRequest->requestedFormatId); /* requestedFormatId (4 bytes) */
+	Stream_Write_UINT32(s, formatDataRequest->requestedFormatId); /* requestedFormatId (4 bytes) */
 	WLog_Print(cliprdr->log, WLOG_DEBUG, "ClientFormatDataRequest");
 	return cliprdr_packet_send(cliprdr, s);
 }
@@ -915,7 +924,6 @@ static UINT cliprdr_client_file_contents_request(CliprdrClientContext* context,
 	WLog_Print(cliprdr->log, WLOG_DEBUG,
 	           "ClientFileContentsRequest: streamId: 0x%08"PRIX32"",
 	           fileContentsRequest->streamId);
-
 	return cliprdr_packet_send(cliprdr, s);
 }
 
@@ -929,7 +937,6 @@ static UINT cliprdr_client_file_contents_response(CliprdrClientContext* context,
 {
 	wStream* s;
 	cliprdrPlugin* cliprdr = (cliprdrPlugin*) context->handle;
-
 	s = cliprdr_packet_new(CB_FILECONTENTS_RESPONSE, fileContentsResponse->msgFlags,
 	                       4 + fileContentsResponse->cbRequested);
 
@@ -1036,7 +1043,6 @@ static VOID VCAPITYPE cliprdr_virtual_channel_open_event_ex(LPVOID lpUserParam, 
 			break;
 
 		case CHANNEL_EVENT_WRITE_COMPLETE:
-			Stream_Free((wStream*) pData, TRUE);
 			break;
 
 		case CHANNEL_EVENT_USER:
@@ -1048,7 +1054,7 @@ static VOID VCAPITYPE cliprdr_virtual_channel_open_event_ex(LPVOID lpUserParam, 
 		                "cliprdr_virtual_channel_open_event_ex reported an error");
 }
 
-static void* cliprdr_virtual_channel_client_thread(void* arg)
+static DWORD WINAPI cliprdr_virtual_channel_client_thread(LPVOID arg)
 {
 	wStream* data;
 	wMessage message;
@@ -1090,8 +1096,8 @@ static void* cliprdr_virtual_channel_client_thread(void* arg)
 		setChannelError(cliprdr->context->rdpcontext, error,
 		                "cliprdr_virtual_channel_client_thread reported an error");
 
-	ExitThread((DWORD)error);
-	return NULL;
+	ExitThread(error);
+	return error;
 }
 
 /**
@@ -1122,8 +1128,8 @@ static UINT cliprdr_virtual_channel_event_connected(cliprdrPlugin* cliprdr,
 		return ERROR_NOT_ENOUGH_MEMORY;
 	}
 
-	if (!(cliprdr->thread = CreateThread(NULL, 0,
-	                                     (LPTHREAD_START_ROUTINE) cliprdr_virtual_channel_client_thread, (void*) cliprdr,
+	if (!(cliprdr->thread = CreateThread(NULL, 0, cliprdr_virtual_channel_client_thread,
+	                                     (void*) cliprdr,
 	                                     0, NULL)))
 	{
 		WLog_ERR(TAG, "CreateThread failed!");
@@ -1143,6 +1149,9 @@ static UINT cliprdr_virtual_channel_event_connected(cliprdrPlugin* cliprdr,
 static UINT cliprdr_virtual_channel_event_disconnected(cliprdrPlugin* cliprdr)
 {
 	UINT rc;
+
+	if (cliprdr->OpenHandle == 0)
+		return CHANNEL_RC_OK;
 
 	if (MessageQueue_PostQuit(cliprdr->queue, 0)
 	    && (WaitForSingleObject(cliprdr->thread, INFINITE) == WAIT_FAILED))
@@ -1182,6 +1191,7 @@ static UINT cliprdr_virtual_channel_event_disconnected(cliprdrPlugin* cliprdr)
 static UINT cliprdr_virtual_channel_event_terminated(cliprdrPlugin* cliprdr)
 {
 	cliprdr->InitHandle = 0;
+	free(cliprdr->context);
 	free(cliprdr);
 	return CHANNEL_RC_OK;
 }
@@ -1201,8 +1211,7 @@ static VOID VCAPITYPE cliprdr_virtual_channel_init_event_ex(LPVOID lpUserParam, 
 	switch (event)
 	{
 		case CHANNEL_EVENT_CONNECTED:
-			if ((error = cliprdr_virtual_channel_event_connected(cliprdr, pData,
-			             dataLength)))
+			if ((error = cliprdr_virtual_channel_event_connected(cliprdr, pData, dataLength)))
 				WLog_ERR(TAG, "cliprdr_virtual_channel_event_connected failed with error %"PRIu32"!",
 				         error);
 
@@ -1250,7 +1259,7 @@ BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS pEntryPoints, PVOID p
 	    CHANNEL_OPTION_ENCRYPT_RDP |
 	    CHANNEL_OPTION_COMPRESS_RDP |
 	    CHANNEL_OPTION_SHOW_PROTOCOL;
-	strcpy(cliprdr->channelDef.name, "cliprdr");
+	sprintf_s(cliprdr->channelDef.name, ARRAYSIZE(cliprdr->channelDef.name), "cliprdr");
 	pEntryPointsEx = (CHANNEL_ENTRY_POINTS_FREERDP_EX*) pEntryPoints;
 
 	if ((pEntryPointsEx->cbSize >= sizeof(CHANNEL_ENTRY_POINTS_FREERDP_EX)) &&

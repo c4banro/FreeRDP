@@ -119,10 +119,10 @@ static BOOL wf_begin_paint(rdpContext* context)
 {
 	HGDI_DC hdc;
 
-	if (!context || !context->gdi || !context->gdi->hdc)
+	if (!context || !context->gdi || !context->gdi->primary || !context->gdi->primary->hdc)
 		return FALSE;
 
-	hdc = context->gdi->hdc;
+	hdc = context->gdi->primary->hdc;
 
 	if (!hdc || !hdc->hwnd || !hdc->hwnd->invalid)
 		return FALSE;
@@ -217,6 +217,7 @@ static BOOL wf_pre_connect(freerdp* instance)
 	settings->OrderSupport[NEG_ELLIPSE_SC_INDEX] = FALSE;
 	settings->OrderSupport[NEG_ELLIPSE_CB_INDEX] = FALSE;
 	wfc->fullscreen = settings->Fullscreen;
+	wfc->floatbar_active = settings->Floatbar;
 
 	if (wfc->fullscreen)
 		wfc->fs_toggle = 1;
@@ -274,9 +275,9 @@ static BOOL wf_pre_connect(freerdp* instance)
 	freerdp_set_param_uint32(settings, FreeRDP_KeyboardLayout,
 	                         (int) GetKeyboardLayout(0) & 0x0000FFFF);
 	PubSub_SubscribeChannelConnected(instance->context->pubSub,
-	                                 (pChannelConnectedEventHandler) wf_OnChannelConnectedEventHandler);
+	                                 wf_OnChannelConnectedEventHandler);
 	PubSub_SubscribeChannelDisconnected(instance->context->pubSub,
-	                                    (pChannelDisconnectedEventHandler) wf_OnChannelDisconnectedEventHandler);
+	                                    wf_OnChannelDisconnectedEventHandler);
 	return TRUE;
 }
 
@@ -308,7 +309,7 @@ static BOOL wf_post_connect(freerdp* instance)
 	rdpCache* cache;
 	wfContext* wfc;
 	rdpContext* context;
-	WCHAR lpWindowName[64];
+	WCHAR lpWindowName[512];
 	rdpSettings* settings;
 	EmbedWindowEventArgs e;
 	const UINT32 format = PIXEL_FORMAT_BGRX32;
@@ -330,13 +331,13 @@ static BOOL wf_post_connect(freerdp* instance)
 	}
 
 	if (settings->WindowTitle != NULL)
-		_snwprintf(lpWindowName, ARRAYSIZE(lpWindowName), L"%S", settings->WindowTitle);
+		_snwprintf_s(lpWindowName, ARRAYSIZE(lpWindowName), _TRUNCATE, L"%S", settings->WindowTitle);
 	else if (settings->ServerPort == 3389)
-		_snwprintf(lpWindowName, ARRAYSIZE(lpWindowName), L"FreeRDP: %S",
-		           settings->ServerHostname);
+		_snwprintf_s(lpWindowName, ARRAYSIZE(lpWindowName), _TRUNCATE, L"FreeRDP: %S",
+		             settings->ServerHostname);
 	else
-		_snwprintf(lpWindowName, ARRAYSIZE(lpWindowName), L"FreeRDP: %S:%u",
-		           settings->ServerHostname, settings->ServerPort);
+		_snwprintf_s(lpWindowName, ARRAYSIZE(lpWindowName), _TRUNCATE, L"FreeRDP: %S:%u",
+		             settings->ServerHostname, settings->ServerPort);
 
 	if (settings->EmbeddedWindow)
 		settings->Decorations = FALSE;
@@ -371,7 +372,6 @@ static BOOL wf_post_connect(freerdp* instance)
 	instance->update->BeginPaint = wf_begin_paint;
 	instance->update->DesktopResize = wf_desktop_resize;
 	instance->update->EndPaint = wf_end_paint;
-	pointer_cache_register_callbacks(instance->update);
 	wf_register_pointer(context->graphics);
 
 	if (!settings->SoftwareGdi)
@@ -505,7 +505,7 @@ static DWORD wf_verify_certificate(freerdp* instance,
 	WLog_INFO(TAG,
 	          "The above X.509 certificate could not be verified, possibly because you do not have "
 	          "the CA certificate in your certificate store, or the certificate has expired. "
-	          "Please look at the documentation on how to create local certificate store for a private CA.");
+	          "Please look at the OpenSSL documentation on how to add a private CA to the store.\n");
 	/* TODO: ask for user validation */
 #if 0
 	input_handle = GetStdHandle(STD_INPUT_HANDLE);
@@ -541,49 +541,7 @@ static DWORD wf_verify_changed_certificate(freerdp* instance,
 	return 0;
 }
 
-
-static BOOL wf_auto_reconnect(freerdp* instance)
-{
-	wfContext* wfc = (wfContext*)instance->context;
-	UINT32 num_retries = 0;
-	UINT32 max_retries = instance->settings->AutoReconnectMaxRetries;
-
-	/* Only auto reconnect on network disconnects. */
-	if (freerdp_error_info(instance) != 0)
-		return FALSE;
-
-	/* A network disconnect was detected */
-	WLog_ERR(TAG, "Network disconnect!");
-
-	if (!instance->settings->AutoReconnectionEnabled)
-	{
-		/* No auto-reconnect - just quit */
-		return FALSE;
-	}
-
-	/* Perform an auto-reconnect. */
-	for (;;)
-	{
-		/* Quit retrying if max retries has been exceeded */
-		if (num_retries++ >= max_retries)
-			return FALSE;
-
-		/* Attempt the next reconnect */
-		WLog_INFO(TAG,  "Attempting reconnect (%lu of %lu)", num_retries, max_retries);
-
-		if (freerdp_reconnect(instance))
-		{
-			return TRUE;
-		}
-
-		Sleep(5000);
-	}
-
-	WLog_ERR(TAG, "Maximum reconnect retries exceeded");
-	return FALSE;
-}
-
-static void* wf_input_thread(void* arg)
+static DWORD WINAPI wf_input_thread(LPVOID arg)
 {
 	int status;
 	wMessage message;
@@ -609,7 +567,7 @@ static void* wf_input_thread(void* arg)
 	}
 
 	ExitThread(0);
-	return NULL;
+	return 0;
 }
 
 static DWORD WINAPI wf_client_thread(LPVOID lpParam)
@@ -620,6 +578,7 @@ static DWORD WINAPI wf_client_thread(LPVOID lpParam)
 	BOOL msg_ret;
 	int quit_msg;
 	DWORD nCount;
+	DWORD error;
 	HANDLE handles[64];
 	wfContext* wfc;
 	freerdp* instance;
@@ -627,7 +586,6 @@ static DWORD WINAPI wf_client_thread(LPVOID lpParam)
 	rdpChannels* channels;
 	rdpSettings* settings;
 	BOOL async_input;
-	BOOL async_transport;
 	HANDLE input_thread;
 	instance = (freerdp*) lpParam;
 	context = instance->context;
@@ -644,17 +602,15 @@ static DWORD WINAPI wf_client_thread(LPVOID lpParam)
 	}
 
 	if (!freerdp_connect(instance))
-		return 0;
+		goto end;
 
 	channels = instance->context->channels;
 	settings = instance->context->settings;
 	async_input = settings->AsyncInput;
-	async_transport = settings->AsyncTransport;
 
 	if (async_input)
 	{
-		if (!(input_thread = CreateThread(NULL, 0,
-		                                  (LPTHREAD_START_ROUTINE) wf_input_thread,
+		if (!(input_thread = CreateThread(NULL, 0, wf_input_thread,
 		                                  instance, 0, NULL)))
 		{
 			WLog_ERR(TAG, "Failed to create async input thread.");
@@ -672,7 +628,6 @@ static DWORD WINAPI wf_client_thread(LPVOID lpParam)
 			wf_event_focus_in(wfc);
 		}
 
-		if (!async_transport)
 		{
 			DWORD tmp = freerdp_get_event_handles(context, &handles[nCount], 64 - nCount);
 
@@ -693,11 +648,10 @@ static DWORD WINAPI wf_client_thread(LPVOID lpParam)
 			break;
 		}
 
-		if (!async_transport)
 		{
 			if (!freerdp_check_event_handles(context))
 			{
-				if (wf_auto_reconnect(instance))
+				if (client_auto_reconnect(instance))
 					continue;
 
 				WLog_ERR(TAG, "Failed to check FreeRDP file descriptor");
@@ -763,9 +717,11 @@ disconnect:
 	if (async_input)
 		CloseHandle(input_thread);
 
-	WLog_DBG(TAG, "Main thread exited.");
-	ExitThread(0);
-	return 0;
+end:
+	error = freerdp_get_last_error(instance->context);
+	WLog_DBG(TAG, "Main thread exited with %" PRIu32, error);
+	ExitThread(error);
+	return error;
 }
 
 static DWORD WINAPI wf_keyboard_thread(LPVOID lpParam)

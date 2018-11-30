@@ -58,7 +58,7 @@
 #define FREERDP_JNI_VERSION "2.0.0"
 
 static void android_OnChannelConnectedEventHandler(
-    rdpContext* context,
+    void* context,
     ChannelConnectedEventArgs* e)
 {
 	rdpSettings* settings;
@@ -67,18 +67,18 @@ static void android_OnChannelConnectedEventHandler(
 	if (!context || !e)
 	{
 		WLog_FATAL(TAG, "%s(context=%p, EventArgs=%p",
-		           __FUNCTION__, (void*) context, (void*) e);
+		           __FUNCTION__, context, (void*) e);
 		return;
 	}
 
 	afc = (androidContext*) context;
-	settings = context->settings;
+	settings = afc->rdpCtx.settings;
 
 	if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0)
 	{
 		if (settings->SoftwareGdi)
 		{
-			gdi_graphics_pipeline_init(context->gdi,
+			gdi_graphics_pipeline_init(afc->rdpCtx.gdi,
 			                           (RdpgfxClientContext*) e->pInterface);
 		}
 		else
@@ -94,7 +94,7 @@ static void android_OnChannelConnectedEventHandler(
 }
 
 static void android_OnChannelDisconnectedEventHandler(
-    rdpContext* context, ChannelDisconnectedEventArgs* e)
+    void* context, ChannelDisconnectedEventArgs* e)
 {
 	rdpSettings* settings;
 	androidContext* afc;
@@ -102,18 +102,18 @@ static void android_OnChannelDisconnectedEventHandler(
 	if (!context || !e)
 	{
 		WLog_FATAL(TAG, "%s(context=%p, EventArgs=%p",
-		           __FUNCTION__, (void*) context, (void*) e);
+		           __FUNCTION__, context, (void*) e);
 		return;
 	}
 
 	afc = (androidContext*) context;
-	settings = context->settings;
+	settings = afc->rdpCtx.settings;
 
 	if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0)
 	{
 		if (settings->SoftwareGdi)
 		{
-			gdi_graphics_pipeline_uninit(context->gdi,
+			gdi_graphics_pipeline_uninit(afc->rdpCtx.gdi,
 			                             (RdpgfxClientContext*) e->pInterface);
 		}
 		else
@@ -260,7 +260,6 @@ static BOOL android_pre_connect(freerdp* instance)
 	settings->OrderSupport[NEG_ELLIPSE_CB_INDEX] = FALSE;
 	rc = PubSub_SubscribeChannelConnected(
 	         instance->context->pubSub,
-	         (pChannelConnectedEventHandler)
 	         android_OnChannelConnectedEventHandler);
 
 	if (rc != CHANNEL_RC_OK)
@@ -271,7 +270,6 @@ static BOOL android_pre_connect(freerdp* instance)
 
 	rc = PubSub_SubscribeChannelDisconnected(
 	         instance->context->pubSub,
-	         (pChannelDisconnectedEventHandler)
 	         android_OnChannelDisconnectedEventHandler);
 
 	if (rc != CHANNEL_RC_OK)
@@ -377,7 +375,6 @@ static BOOL android_post_connect(freerdp* instance)
 	instance->update->BeginPaint = android_begin_paint;
 	instance->update->EndPaint = android_end_paint;
 	instance->update->DesktopResize = android_desktop_resize;
-	pointer_cache_register_callbacks(update);
 	freerdp_callback("OnSettingsChanged", "(JIII)V", (jlong)instance,
 	                 settings->DesktopWidth, settings->DesktopHeight,
 	                 settings->ColorDepth);
@@ -450,7 +447,7 @@ static DWORD android_verify_certificate(
 	WLog_DBG(TAG,
 	         "The above X.509 certificate could not be verified, possibly because you do not have "
 	         "the CA certificate in your certificate store, or the certificate has expired."
-	         "Please look at the documentation on how to create local certificate store for a private CA.\n");
+	         "Please look at the OpenSSL documentation on how to add a private CA to the store.\n");
 	JNIEnv* env;
 	jboolean attached = jni_attach_thread(&env);
 	jstring jstr0 = (*env)->NewStringUTF(env, common_name);
@@ -496,7 +493,7 @@ static DWORD android_verify_changed_certificate(freerdp* instance,
 	return res;
 }
 
-static void* jni_input_thread(void* arg)
+static DWORD WINAPI jni_input_thread(LPVOID arg)
 {
 	HANDLE event[2];
 	wMessageQueue* queue;
@@ -538,7 +535,7 @@ static void* jni_input_thread(void* arg)
 disconnect:
 	MessageQueue_PostQuit(queue, 0);
 	ExitThread(0);
-	return NULL;
+	return 0;
 }
 
 static int android_freerdp_run(freerdp* instance)
@@ -555,8 +552,7 @@ static int android_freerdp_run(freerdp* instance)
 
 	if (async_input)
 	{
-		if (!(inputThread = CreateThread(NULL, 0,
-		                                 (LPTHREAD_START_ROUTINE) jni_input_thread, instance, 0, NULL)))
+		if (!(inputThread = CreateThread(NULL, 0, jni_input_thread, instance, 0, NULL)))
 		{
 			WLog_ERR(TAG, "async input: failed to create input thread");
 			goto disconnect;
@@ -622,6 +618,8 @@ disconnect:
 
 	if (async_input && inputThread)
 	{
+		wMessageQueue* input_queue = freerdp_get_message_queue(instance, FREERDP_INPUT_MESSAGE_QUEUE);
+		MessageQueue_PostQuit(input_queue, 0);
 		WaitForSingleObject(inputThread, INFINITE);
 		CloseHandle(inputThread);
 	}
@@ -629,7 +627,7 @@ disconnect:
 	return status;
 }
 
-static void* android_thread_func(void* param)
+static DWORD WINAPI android_thread_func(LPVOID param)
 {
 	DWORD status = ERROR_BAD_ARGUMENTS;
 	freerdp* instance = param;
@@ -669,7 +667,7 @@ fail:
 
 	WLog_DBG(TAG, "Quit.");
 	ExitThread(status);
-	return NULL;
+	return status;
 }
 
 static BOOL android_client_new(freerdp* instance, rdpContext* context)
@@ -871,9 +869,8 @@ static jboolean JNICALL jni_freerdp_connect(JNIEnv* env, jclass cls,
 
 	ctx = (androidContext*)inst->context;
 
-	if (!(ctx->thread = CreateThread(
-	                        NULL, 0, (LPTHREAD_START_ROUTINE)android_thread_func,
-	                        inst, 0, NULL)))
+	if (!(ctx->thread = CreateThread(NULL, 0, android_thread_func,
+	                                 inst, 0, NULL)))
 	{
 		return JNI_FALSE;
 	}

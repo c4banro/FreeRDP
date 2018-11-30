@@ -154,8 +154,8 @@ static UINT cliprdr_send_data_request(wfClipboard* clipboard, UINT32 format);
 static UINT cliprdr_send_lock(wfClipboard* clipboard);
 static UINT cliprdr_send_unlock(wfClipboard* clipboard);
 static UINT cliprdr_send_request_filecontents(wfClipboard* clipboard,
-        void* streamid,
-        int index, int flag, DWORD positionhigh,
+        const void* streamid,
+        LONG index, int flag, DWORD positionhigh,
         DWORD positionlow, ULONG request);
 
 static void CliprdrDataObject_Delete(CliprdrDataObject* instance);
@@ -1289,8 +1289,8 @@ static UINT cliprdr_send_format_list(wfClipboard* clipboard)
 
 	for (index = 0; index < numFormats; index++)
 	{
-		if(GetClipboardFormatNameA(formats[index].formatId, formatName,
-		                        sizeof(formatName)))
+		if (GetClipboardFormatNameA(formats[index].formatId, formatName,
+		                            sizeof(formatName)))
 		{
 			formats[index].formatName = _strdup(formatName);
 		}
@@ -1330,10 +1330,10 @@ static UINT cliprdr_send_data_request(wfClipboard* clipboard, UINT32 formatId)
 	return rc;
 }
 
-static UINT cliprdr_send_request_filecontents(wfClipboard* clipboard,
-        const void* streamid,
-        int index, int flag, DWORD positionhigh,
-        DWORD positionlow, ULONG nreq)
+UINT cliprdr_send_request_filecontents(wfClipboard* clipboard,
+                                       const void* streamid,
+                                       LONG index, int flag, DWORD positionhigh,
+                                       DWORD positionlow, ULONG nreq)
 {
 	UINT rc;
 	CLIPRDR_FILE_CONTENTS_REQUEST fileContentsRequest;
@@ -1565,7 +1565,7 @@ static int create_cliprdr_window(wfClipboard* clipboard)
 	return 0;
 }
 
-static void* cliprdr_thread_func(void* arg)
+static DWORD WINAPI cliprdr_thread_func(LPVOID arg)
 {
 	int ret;
 	MSG msg;
@@ -1576,7 +1576,7 @@ static void* cliprdr_thread_func(void* arg)
 	if ((ret = create_cliprdr_window(clipboard)) != 0)
 	{
 		DEBUG_CLIPRDR("error: create clipboard window failed.");
-		return NULL;
+		return 0;
 	}
 
 	while ((mcode = GetMessage(&msg, 0, 0, 0)) != 0)
@@ -1594,7 +1594,7 @@ static void* cliprdr_thread_func(void* arg)
 	}
 
 	OleUninitialize();
-	return NULL;
+	return 0;
 }
 
 static void clear_file_array(wfClipboard* clipboard)
@@ -2046,7 +2046,7 @@ static BOOL wf_cliprdr_process_filename(wfClipboard* clipboard,
 	if (!wf_cliprdr_add_to_file_arrays(clipboard, wFileName, pathLen))
 		return FALSE;
 
-	if ((clipboard->fileDescriptor[clipboard->nFiles - 1]->dwFileAttributes &
+	if ((clipboard->fileDescriptor[clipboard->nFiles - 1]->dwFileAttributes&
 	     FILE_ATTRIBUTE_DIRECTORY) != 0)
 	{
 		/* this is a directory */
@@ -2508,8 +2508,8 @@ BOOL wf_cliprdr_init(wfContext* wfc, CliprdrClientContext* cliprdr)
 	      && clipboard->GetUpdatedClipboardFormats))
 		clipboard->legacyApi = TRUE;
 
-	if (!(clipboard->format_mappings = (formatMapping*) calloc(1,
-	                                   sizeof(formatMapping) * clipboard->map_capacity)))
+	if (!(clipboard->format_mappings = (formatMapping*) calloc(clipboard->map_capacity,
+	                                   sizeof(formatMapping))))
 		goto error;
 
 	if (!(clipboard->response_data_event = CreateEvent(NULL, TRUE, FALSE,
@@ -2520,8 +2520,7 @@ BOOL wf_cliprdr_init(wfContext* wfc, CliprdrClientContext* cliprdr)
 	                              _T("request_filecontents_event"))))
 		goto error;
 
-	if (!(clipboard->thread = CreateThread(NULL, 0,
-	                                       (LPTHREAD_START_ROUTINE) cliprdr_thread_func, clipboard, 0, NULL)))
+	if (!(clipboard->thread = CreateThread(NULL, 0, cliprdr_thread_func, clipboard, 0, NULL)))
 		goto error;
 
 	cliprdr->MonitorReady = wf_cliprdr_monitor_ready;

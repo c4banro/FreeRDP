@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef __WF_INTERFACE_H
-#define __WF_INTERFACE_H
+#ifndef FREERDP_CLIENT_WIN_INTERFACE_H
+#define FREERDP_CLIENT_WIN_INTERFACE_H
 
 #include <winpr/windows.h>
 
@@ -80,6 +80,7 @@ struct wf_context
 	int offset_y;
 	int fs_toggle;
 	int fullscreen;
+	int floatbar_active;
 	int percentscreen;
 	char window_title[64];
 	int client_x;
@@ -148,4 +149,4 @@ FREERDP_API void wf_size_scrollbars(wfContext* wfc, UINT32 client_width,
 }
 #endif
 
-#endif
+#endif /* FREERDP_CLIENT_WIN_INTERFACE_H */

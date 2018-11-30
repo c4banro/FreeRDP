@@ -30,6 +30,7 @@
 
 #include <freerdp/codec/color.h>
 #include <winpr/crt.h>
+#include <winpr/sysinfo.h>
 
 #include "nsc_types.h"
 #include "nsc_sse2.h"
@@ -54,9 +55,7 @@ static void nsc_encode_argb_to_aycocg_sse2(NSC_CONTEXT* context,
 	__m128i co_val;
 	__m128i cg_val;
 	UINT32 tempWidth;
-	UINT32 tempHeight;
 	tempWidth = ROUND_UP_TO(context->width, 8);
-	tempHeight = ROUND_UP_TO(context->height, 2);
 	rw = (context->ChromaSubsamplingLevel > 0 ? tempWidth : context->width);
 	ccl = context->ColorLossLevel;
 
@@ -326,9 +325,12 @@ static void nsc_encode_argb_to_aycocg_sse2(NSC_CONTEXT* context,
 
 	if (context->ChromaSubsamplingLevel > 0 && (y % 2) == 1)
 	{
-		CopyMemory(yplane + rw, yplane, rw);
-		CopyMemory(coplane + rw, coplane, rw);
-		CopyMemory(cgplane + rw, cgplane, rw);
+		yplane = context->priv->PlaneBuffers[0] + y * rw;
+		coplane = context->priv->PlaneBuffers[1] + y * rw;
+		cgplane = context->priv->PlaneBuffers[2] + y * rw;
+		CopyMemory(yplane, yplane - rw, rw);
+		CopyMemory(coplane, coplane - rw, rw);
+		CopyMemory(cgplane, cgplane - rw, rw);
 	}
 }
 
@@ -383,7 +385,7 @@ static void nsc_encode_subsampling_sse2(NSC_CONTEXT* context)
 	}
 }
 
-static void nsc_encode_sse2(NSC_CONTEXT* context, const BYTE* data,
+static BOOL nsc_encode_sse2(NSC_CONTEXT* context, const BYTE* data,
                             UINT32 scanline)
 {
 	nsc_encode_argb_to_aycocg_sse2(context, data, scanline);
@@ -392,10 +394,15 @@ static void nsc_encode_sse2(NSC_CONTEXT* context, const BYTE* data,
 	{
 		nsc_encode_subsampling_sse2(context);
 	}
+
+	return TRUE;
 }
 
 void nsc_init_sse2(NSC_CONTEXT* context)
 {
-	IF_PROFILER(context->priv->prof_nsc_encode->name = "nsc_encode_sse2");
+	if (!IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE))
+		return;
+
+	PROFILER_RENAME(context->priv->prof_nsc_encode, "nsc_encode_sse2");
 	context->encode = nsc_encode_sse2;
 }

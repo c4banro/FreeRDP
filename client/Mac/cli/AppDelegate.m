@@ -124,7 +124,7 @@ void mac_set_view_size(rdpContext* context, MRDPView* view);
 
 		length = (int)([str length] + 1);
 		cptr = (char*) malloc(length);
-		strcpy(cptr, [str UTF8String]);
+		sprintf_s(cptr, length, "%s", [str UTF8String]);
 		context->argv[i++] = cptr;
 	}
 
@@ -290,6 +290,8 @@ void mac_set_view_size(rdpContext* context, MRDPView* view)
 	[[view window] setContentMaxSize:innerRect.size];
 	// set window to given area
 	[[view window] setFrame:outerRect display:YES];
+	// set window to front
+	[NSApp activateIgnoringOtherApps:YES];
 
 	if (context->settings->Fullscreen)
 		[[view window] toggleFullScreen:nil];

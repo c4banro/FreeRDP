@@ -39,13 +39,13 @@
 static BOOL freerdp_client_common_new(freerdp* instance, rdpContext* context)
 {
 	RDP_CLIENT_ENTRY_POINTS* pEntryPoints = instance->pClientEntryPoints;
-	return pEntryPoints->ClientNew(instance, context);
+	return IFCALLRESULT(TRUE, pEntryPoints->ClientNew, instance, context);
 }
 
 static void freerdp_client_common_free(freerdp* instance, rdpContext* context)
 {
 	RDP_CLIENT_ENTRY_POINTS* pEntryPoints = instance->pClientEntryPoints;
-	pEntryPoints->ClientFree(instance, context);
+	IFCALL(pEntryPoints->ClientFree, instance, context);
 }
 
 /* Common API */
@@ -303,27 +303,44 @@ out:
 }
 
 int freerdp_client_settings_parse_assistance_file(rdpSettings* settings,
-        const char* filename)
+        int argc, char* argv[])
 {
-	int status;
+	int status, x;
+	int ret = -1;
+	char* filename;
+	char* password = NULL;
 	rdpAssistanceFile* file;
+
+	if (!settings || !argv || (argc < 2))
+		return -1;
+
+	filename = argv[1];
+
+	for (x = 2; x < argc; x++)
+	{
+		const char* key = strstr(argv[x], "assistance:");
+
+		if (key)
+			password = strchr(key, ':') + 1;
+	}
+
 	file = freerdp_assistance_file_new();
 
 	if (!file)
 		return -1;
 
-	status = freerdp_assistance_parse_file(file, filename);
+	status = freerdp_assistance_parse_file(file, filename, password);
 
 	if (status < 0)
-		return -1;
+		goto out;
 
-	status = freerdp_client_populate_settings_from_assistance_file(file, settings);
+	if (!freerdp_assistance_populate_settings_from_assistance_file(file, settings))
+		goto out;
 
-	if (status < 0)
-		return -1;
-
+	ret = 0;
+out:
 	freerdp_assistance_file_free(file);
-	return 0;
+	return ret;
 }
 
 /** Callback set in the rdp_freerdp structure, and used to get the user's password,
@@ -422,6 +439,12 @@ fail:
 BOOL client_cli_authenticate(freerdp* instance, char** username,
                              char** password, char** domain)
 {
+	if (instance->settings->SmartcardLogon)
+	{
+		WLog_INFO(TAG, "Authentication via smartcard");
+		return TRUE;
+	}
+
 	return client_cli_authenticate_raw(instance, FALSE, username, password, domain);
 }
 
@@ -501,7 +524,7 @@ DWORD client_cli_verify_certificate(freerdp* instance, const char* common_name,
 	printf("\tThumbprint: %s\n", fingerprint);
 	printf("The above X.509 certificate could not be verified, possibly because you do not have\n"
 	       "the CA certificate in your certificate store, or the certificate has expired.\n"
-	       "Please look at the documentation on how to create local certificate store for a private CA.\n");
+	       "Please look at the OpenSSL documentation on how to add a private CA to the store.\n");
 	return client_cli_accept_certificate(instance->settings);
 }
 
@@ -542,6 +565,66 @@ DWORD client_cli_verify_changed_certificate(freerdp* instance,
 	       "This may indicate that the certificate has been tampered with.\n"
 	       "Please contact the administrator of the RDP server and clarify.\n");
 	return client_cli_accept_certificate(instance->settings);
+}
+
+BOOL client_auto_reconnect(freerdp* instance)
+{
+	return client_auto_reconnect_ex(instance, NULL);
+}
+
+BOOL client_auto_reconnect_ex(freerdp* instance, BOOL(*window_events)(freerdp* instance))
+{
+	UINT32 maxRetries;
+	UINT32 numRetries = 0;
+	rdpSettings* settings;
+
+	if (!instance || !instance->settings)
+		return FALSE;
+
+	settings = instance->settings;
+	maxRetries = settings->AutoReconnectMaxRetries;
+
+	/* Only auto reconnect on network disconnects. */
+	if (freerdp_error_info(instance) != 0)
+		return FALSE;
+
+	/* A network disconnect was detected */
+	WLog_INFO(TAG, "Network disconnect!");
+
+	if (!settings->AutoReconnectionEnabled)
+	{
+		/* No auto-reconnect - just quit */
+		return FALSE;
+	}
+
+	/* Perform an auto-reconnect. */
+	while (TRUE)
+	{
+		UINT32 x;
+
+		/* Quit retrying if max retries has been exceeded */
+		if ((maxRetries > 0) && (numRetries++ >= maxRetries))
+		{
+			return FALSE;
+		}
+
+		/* Attempt the next reconnect */
+		WLog_INFO(TAG, "Attempting reconnect (%"PRIu32" of %"PRIu32")", numRetries, maxRetries);
+
+		if (freerdp_reconnect(instance))
+			return TRUE;
+
+		for (x = 0; x < 50; x++)
+		{
+			if (!IFCALLRESULT(TRUE, window_events, instance))
+				return FALSE;
+
+			Sleep(100);
+		}
+	}
+
+	WLog_ERR(TAG, "Maximum reconnect retries exceeded");
+	return FALSE;
 }
 
 

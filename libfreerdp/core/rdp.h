@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef __RDP_H
-#define __RDP_H
+#ifndef FREERDP_LIB_CORE_RDP_H
+#define FREERDP_LIB_CORE_RDP_H
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -180,7 +180,7 @@ struct rdp_rdp
 	UINT32 reduce_cpu;
 };
 
-FREERDP_LOCAL BOOL rdp_read_security_header(wStream* s, UINT16* flags);
+FREERDP_LOCAL BOOL rdp_read_security_header(wStream* s, UINT16* flags, UINT16* length);
 FREERDP_LOCAL void rdp_write_security_header(wStream* s, UINT16 flags);
 
 FREERDP_LOCAL BOOL rdp_read_share_control_header(wStream* s, UINT16* length,
@@ -195,20 +195,18 @@ FREERDP_LOCAL BOOL rdp_read_share_data_header(wStream* s, UINT16* length,
 FREERDP_LOCAL void rdp_write_share_data_header(wStream* s, UINT16 length,
         BYTE type, UINT32 share_id);
 
-FREERDP_LOCAL int rdp_init_stream(rdpRdp* rdp, wStream* s);
 FREERDP_LOCAL wStream* rdp_send_stream_init(rdpRdp* rdp);
+FREERDP_LOCAL wStream* rdp_send_stream_pdu_init(rdpRdp* rdp);
 
 FREERDP_LOCAL BOOL rdp_read_header(rdpRdp* rdp, wStream* s, UINT16* length,
                                    UINT16* channel_id);
 FREERDP_LOCAL void rdp_write_header(rdpRdp* rdp, wStream* s, UINT16 length,
                                     UINT16 channel_id);
 
-FREERDP_LOCAL int rdp_init_stream_pdu(rdpRdp* rdp, wStream* s);
 FREERDP_LOCAL BOOL rdp_send_pdu(rdpRdp* rdp, wStream* s, UINT16 type,
                                 UINT16 channel_id);
 
 FREERDP_LOCAL wStream* rdp_data_pdu_init(rdpRdp* rdp);
-FREERDP_LOCAL int rdp_init_stream_data_pdu(rdpRdp* rdp, wStream* s);
 FREERDP_LOCAL BOOL rdp_send_data_pdu(rdpRdp* rdp, wStream* s, BYTE type,
                                      UINT16 channel_id);
 FREERDP_LOCAL int rdp_recv_data_pdu(rdpRdp* rdp, wStream* s);
@@ -216,7 +214,7 @@ FREERDP_LOCAL int rdp_recv_data_pdu(rdpRdp* rdp, wStream* s);
 FREERDP_LOCAL BOOL rdp_send(rdpRdp* rdp, wStream* s, UINT16 channelId);
 
 FREERDP_LOCAL int rdp_send_channel_data(rdpRdp* rdp, UINT16 channelId,
-                                        BYTE* data, int size);
+                                        const BYTE* data, int size);
 
 FREERDP_LOCAL wStream* rdp_message_channel_pdu_init(rdpRdp* rdp);
 FREERDP_LOCAL BOOL rdp_send_message_channel_pdu(rdpRdp* rdp, wStream* s,
@@ -248,9 +246,9 @@ extern const char* DATA_PDU_TYPE_STRINGS[80];
 #define DEBUG_RDP(...) do { } while (0)
 #endif
 
-BOOL rdp_decrypt(rdpRdp* rdp, wStream* s, int length, UINT16 securityFlags);
+BOOL rdp_decrypt(rdpRdp* rdp, wStream* s, INT32 length, UINT16 securityFlags);
 
 BOOL rdp_set_error_info(rdpRdp* rdp, UINT32 errorInfo);
 BOOL rdp_send_error_info(rdpRdp* rdp);
 
-#endif /* __RDP_H */
+#endif /* FREERDP_LIB_CORE_RDP_H */
