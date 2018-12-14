@@ -550,12 +550,12 @@ BOOL freerdp_disconnect(freerdp* instance)
 	if (!instance || !instance->context || !instance->context->rdp)
 		return FALSE;
 
-	rdp = instance->context->rdp;
+    update_post_disconnect(instance->update);
 
-	if (!rdp_client_disconnect(rdp))
-		rc = FALSE;
+    rdp = instance->context->rdp;
 
-	update_post_disconnect(instance->update);
+    if (!rdp_client_disconnect(rdp))
+        rc = FALSE;
 
 	if (instance->settings->AsyncInput)
 	{
