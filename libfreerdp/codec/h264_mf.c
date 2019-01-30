@@ -129,6 +129,7 @@ struct _H264_CONTEXT_MF
 	pfnMFCreateSample MFCreateSample;
 	pfnMFCreateMemoryBuffer MFCreateMemoryBuffer;
 	pfnMFCreateMediaType MFCreateMediaType;
+    bool callCoUnitialize;
 };
 typedef struct _H264_CONTEXT_MF H264_CONTEXT_MF;
 
@@ -482,8 +483,11 @@ static void mf_uninit(H264_CONTEXT* h264)
 			FreeLibrary(sys->mfplat);
 			sys->mfplat = NULL;
 
-			if (mf_plat_loaded(sys))
-				CoUninitialize();
+            if (mf_plat_loaded(sys))
+            {
+                if (sys->callCoUnitialize)
+                    CoUninitialize();
+            }
 		}
 
 		for (x = 0; x < sizeof(h264->pYUVData) / sizeof(h264->pYUVData[0]); x++)
@@ -504,6 +508,7 @@ static BOOL mf_init(H264_CONTEXT* h264)
 
 	if (!sys)
 		goto error;
+    sys->callCoUnitialize = false;
 
 	h264->pSystemData = (void*) sys;
 	/* http://decklink-sdk-delphi.googlecode.com/svn/trunk/Blackmagic%20DeckLink%20SDK%209.7/Win/Samples/Streaming/StreamingPreview/DecoderMF.cpp */
@@ -524,7 +529,8 @@ static BOOL mf_init(H264_CONTEXT* h264)
 	if (!mf_plat_loaded(sys))
 		goto error;
 
-	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+	hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    sys->callCoUnitialize = SUCCEEDED(hr);
 
 	if (h264->Compressor)
 	{

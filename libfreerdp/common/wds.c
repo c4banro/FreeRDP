@@ -36,6 +36,8 @@
 
 #include <freerdp/wds.h>
 
+#include <Mstcpip.h>
+
 
 #define TAG FREERDP_TAG("core")
 
@@ -937,6 +939,21 @@ FREERDP_LOCAL int freerdp_wds_wait_for_connect( rdpWdsReverseConnection* connect
     }
 
     WLog_INFO( TAG, "freerdp_wds_wait_for_connect - clientsocket %i accepted", idxSignaledListener + 1 );
+
+
+    struct tcp_keepalive keepAliveVals;
+    keepAliveVals.onoff = RCVALL_ON;
+    keepAliveVals.keepalivetime = 1000; //ms
+    keepAliveVals.keepaliveinterval = 1000; //ms
+    DWORD bytesReturned;
+
+    /* set keepalive*/
+    if (WSAIoctl(clientSocket, SIO_KEEPALIVE_VALS, &keepAliveVals, sizeof(keepAliveVals), NULL, 0, &bytesReturned, NULL, NULL))
+    {
+        closesocket(clientSocket);
+        WLog_ERR(TAG, "freerdp_wds_wait_for_connect - clientsocket %i error %i in WSAIoctl", idxSignaledListener + 1, WSAGetLastError());
+        goto on_error;
+    }
 
 	/* set socket in blocking mode */
 	if ( WSAEventSelect( clientSocket, NULL, 0 ) )
